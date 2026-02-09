@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GASCO Location Collector (Coords & Links)</title>
+    <title>Smart GASCO Collector</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
@@ -12,55 +12,41 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
 
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
     <style>
-        body {
-            font-family: 'Cairo', 'Inter', 'sans-serif';
-            background-color: #f8fafc;
+        body { font-family: 'Cairo', sans-serif; background-color: #f1f5f9; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        .glass-panel {
+            background: white;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
         }
-        .btn {
-            @apply font-bold py-2 px-4 rounded-lg shadow-md transition-all duration-200 ease-in-out transform hover:shadow-lg hover:-translate-y-px focus:outline-none focus:ring-2 focus:ring-offset-2 border border-transparent;
+        
+        .input-group {
+            position: relative;
+            transition: all 0.2s;
         }
-        .btn-primary {
-            @apply bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500 disabled:opacity-60 disabled:cursor-not-allowed;
+        .input-group:focus-within {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
         }
-        .btn-secondary {
-            @apply bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 focus:ring-slate-300;
+        
+        .btn-modern {
+            transition: all 0.2s;
         }
-        .btn-danger {
-            @apply bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
-        }
-        .btn-export {
-            @apply bg-emerald-600 text-white hover:bg-emerald-700 focus:ring-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed;
-        }
-        .table-header-cell {
-            @apply px-4 py-3 text-right text-xs font-bold text-slate-600 uppercase tracking-wider bg-slate-50 border-b border-slate-200;
-        }
-        .table-body-cell {
-            @apply px-4 py-3 whitespace-nowrap border-b border-slate-100;
-        }
-        .tab-button {
-            @apply whitespace-nowrap py-3 px-4 border-b-2 font-medium text-sm transition-colors duration-200;
-        }
-        .tab-button-active {
-            @apply border-blue-500 text-blue-600;
-        }
-        .tab-button-inactive {
-            @apply border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300;
-        }
-        /* Print Styles for QR */
-        @media print {
-            body * { visibility: hidden; }
-            .printable-area, .printable-area * { visibility: visible; }
-            .printable-area {
-                position: absolute; left: 0; top: 0; width: 100%; height: 100%;
-                display: flex; flex-direction: column; align-items: center; justify-content: center;
-            }
-            .no-print { display: none !important; }
-        }
+        .btn-modern:active { transform: scale(0.98); }
+        
+        /* Smooth Fade In */
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 <script type="importmap">
 {
@@ -80,7 +66,7 @@
         import ReactDOM from 'react-dom/client';
         const e = React.createElement;
 
-        // --- Firebase Configuration ---
+        // --- Configuration ---
         const firebaseConfig = {
           apiKey: "AIzaSyA2VDO_vXe8q5Pfon2BGPoL3tD0IKbkBhg",
           authDomain: "students-grade-management.firebaseapp.com",
@@ -92,65 +78,42 @@
           measurementId: "G-C4GT0V5C0V"
         };
         
-        if (!window.firebase.apps.length) {
-            window.firebase.initializeApp(firebaseConfig);
-        }
+        if (!window.firebase.apps.length) window.firebase.initializeApp(firebaseConfig);
 
-        // =====================================================================================
-        // --- COORD CONVERSION SETUP (UTM Zone 36N) ---
-        // =====================================================================================
-        if (window.proj4) {
-            window.proj4.defs("EPSG:32636", "+proj=utm +zone=36 +datum=WGS84 +units=m +no_defs");
-        }
+        if (window.proj4) window.proj4.defs("EPSG:32636", "+proj=utm +zone=36 +datum=WGS84 +units=m +no_defs");
 
+        // --- Helpers ---
         function convertToUTM(lat, lon) {
             if (!window.proj4) return { x: 0, y: 0 };
             const result = window.proj4("EPSG:4326", "EPSG:32636", [lon, lat]);
             return { x: result[0], y: result[1] };
         }
 
-        // =====================================================================================
-        // --- UTILITIES (UPDATED) ---
-        // =====================================================================================
         function extractCoordinates(urlInput) {
             if (!urlInput) return null;
-            // Remove spaces to handle "Lat, Lon" vs "Lat,Lon"
             let input = decodeURIComponent(urlInput).replace(/\s/g, '');
-            
             const patterns = [
-                // 1. RAW COORDINATES: Matches "31.123,32.456" (Start to End)
-                /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/,
-                
-                // 2. Google Maps Link Patterns
+                /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/, // Raw Lat,Lon
                 /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/,
                 /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/,
                 /q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/,
                 /ll=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/
             ];
-
             for (const pattern of patterns) {
                 const match = input.match(pattern);
                 if (match && match.length >= 3) {
                     const lat = parseFloat(match[1]);
                     const lon = parseFloat(match[2]);
-                    // Validate basic range
-                    if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90) {
-                        return { lat, lon };
-                    }
+                    if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90) return { lat, lon };
                 }
             }
             return null;
         }
 
         const COLS = {
-            CLIENT: 'اسم_المنشأة',
-            SAP_CODE: 'كود_ساب_إيجاس',
-            PETRO_CODE: 'كود_بتروتريد',
-            CRN: 'CRN', 
-            GOV: 'gove_name',
-            ACTIVITY: 'نوع_النشاط',
-            CAPACITY: 'كميات_الغاز_الصادر__بها_موافقة',
-            START_DATE: 'تاريخ_بداية_العقد'
+            CLIENT: 'اسم_المنشأة', SAP_CODE: 'كود_ساب_إيجاس', PETRO_CODE: 'كود_بتروتريد',
+            CRN: 'CRN', GOV: 'gove_name', ACTIVITY: 'نوع_النشاط',
+            CAPACITY: 'كميات_الغاز_الصادر__بها_موافقة', START_DATE: 'تاريخ_بداية_العقد'
         };
 
         const excelDateToJSDate = (serial) => {
@@ -162,21 +125,25 @@
             return date_info.toLocaleDateString('ar-EG');
         };
 
-        // =====================================================================================
-        // --- COMPONENTS ---
-        // =====================================================================================
+        // --- Components ---
         
-        const Alert = ({ message, type }) => {
-            const colors = type === 'error' ? 'bg-red-50 text-red-800 border-red-200' : 'bg-green-50 text-green-800 border-green-200';
-            return e('div', { className: `p-4 mb-4 rounded border ${colors}` }, message);
-        };
+        const StatsCard = ({ title, value, icon, color }) => 
+            e('div', { className: "bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center justify-between" },
+                e('div', null,
+                    e('p', { className: "text-slate-500 text-xs font-semibold uppercase tracking-wider" }, title),
+                    e('h3', { className: "text-2xl font-bold text-slate-800 mt-1" }, value)
+                ),
+                e('div', { className: `w-10 h-10 rounded-full flex items-center justify-center ${color}` },
+                    e('i', { className: `fa-solid ${icon} text-white` })
+                )
+            );
 
-        const Header = ({ title, count }) => e('header', { className: "bg-slate-800 text-white py-4 shadow-md" },
-            e('div', { className: "container mx-auto px-4 flex justify-between items-center" },
-                e('h1', { className: "text-xl font-bold" }, title),
-                e('span', { className: "bg-white/20 px-3 py-1 rounded-full text-sm" }, count)
-            )
-        );
+        const ProgressBar = ({ total, current }) => {
+            const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+            return e('div', { className: "w-full bg-slate-200 rounded-full h-2.5 mt-2 overflow-hidden" },
+                e('div', { className: "bg-blue-600 h-2.5 rounded-full transition-all duration-500", style: { width: `${percent}%` } })
+            );
+        };
 
         const MainApp = () => {
             const { useState, useEffect, useMemo } = React;
@@ -187,11 +154,12 @@
             const [showLogin, setShowLogin] = useState(false);
             
             const [refData, setRefData] = useState([]); 
-            const [fileName, setFileName] = useState('');
             const [collected, setCollected] = useState([]);
             
             const [selGov, setSelGov] = useState('');
             const [selIndex, setSelIndex] = useState('');
+            const [searchTerm, setSearchTerm] = useState(''); // Smart Search
+            
             const [gMapLink, setGMapLink] = useState('');
             const [coords, setCoords] = useState(null);
             const [utm, setUtm] = useState(null);
@@ -206,10 +174,7 @@
                 const db = window.firebase.database();
                 db.ref('masterReference').on('value', snap => {
                     const val = snap.val();
-                    if (val && val.data) {
-                        setRefData(val.data);
-                        setFileName(val.fileName);
-                    } else { setRefData([]); }
+                    if (val && val.data) setRefData(val.data);
                 });
                 db.ref('collectedLocations').on('value', snap => {
                     const val = snap.val();
@@ -232,29 +197,81 @@
                 }
             }, [qrData]);
 
-            // --- Helpers ---
+            // --- Logic ---
+            const normalizeKeys = (row) => ({
+                id: row['UniqueID'],
+                clientName: row[COLS.CLIENT] || 'Unknown',
+                commercialCode: row[COLS.SAP_CODE] || row[COLS.PETRO_CODE] || '_',
+                petroCode: row[COLS.PETRO_CODE] || '',
+                crn: row[COLS.CRN] || '', 
+                governorate: row[COLS.GOV] || 'Unknown',
+                activity: row[COLS.ACTIVITY] || '',
+                capacity: row[COLS.CAPACITY] || '',
+                startDate: excelDateToJSDate(row[COLS.START_DATE]),
+                ...row 
+            });
+
+            const govs = useMemo(() => {
+                const s = new Set();
+                refData.forEach(r => { if(r[COLS.GOV]) s.add(r[COLS.GOV].toString().trim()); });
+                return Array.from(s).sort();
+            }, [refData]);
+
+            const filteredClients = useMemo(() => {
+                if (!selGov) return [];
+                const collectedIds = new Set(collected.map(c => c.masterRefId));
+                let list = refData
+                    .map((r, i) => ({ ...normalizeKeys(r), originalIndex: i }))
+                    .filter(r => r.governorate.toString().trim() === selGov);
+                
+                // Smart Search Filtering
+                if (searchTerm) {
+                    const lowerSearch = searchTerm.toLowerCase();
+                    list = list.filter(r => 
+                        r.clientName.toLowerCase().includes(lowerSearch) || 
+                        r.commercialCode.toString().includes(lowerSearch) ||
+                        r.activity.toLowerCase().includes(lowerSearch)
+                    );
+                }
+
+                return list.map(r => ({ ...r, isDone: collectedIds.has(r.UniqueID) }));
+            }, [selGov, refData, collected, searchTerm]);
+
+            const selectedItem = useMemo(() => {
+                if (selIndex === '') return null;
+                return normalizeKeys(refData[parseInt(selIndex)]);
+            }, [selIndex, refData]);
+
+            const govStats = useMemo(() => {
+                if(!selGov) return { total: 0, done: 0 };
+                const total = refData.filter(r => r[COLS.GOV] && r[COLS.GOV].toString().trim() === selGov).length;
+                const done = collected.filter(c => c.governorate === selGov).length;
+                return { total, done };
+            }, [selGov, refData, collected]);
+
+            // --- Handlers ---
             const showAlert = (msg, type = 'success') => {
                 setAlert({ message: msg, type });
                 setTimeout(() => setAlert(null), 4000);
             };
 
-            const normalizeKeys = (row) => {
-                return {
-                    id: row['UniqueID'],
-                    clientName: row[COLS.CLIENT] || 'Unknown',
-                    commercialCode: row[COLS.SAP_CODE] || row[COLS.PETRO_CODE] || '_',
-                    petroCode: row[COLS.PETRO_CODE] || '',
-                    crn: row[COLS.CRN] || '', 
-                    governorate: row[COLS.GOV] || 'Unknown',
-                    activity: row[COLS.ACTIVITY] || '',
-                    capacity: row[COLS.CAPACITY] || '',
-                    startDate: excelDateToJSDate(row[COLS.START_DATE]),
-                    ...row 
-                };
+            const handleLinkChange = (val) => {
+                setGMapLink(val);
+                const extracted = extractCoordinates(val);
+                setCoords(extracted);
+                if (extracted) setUtm(convertToUTM(extracted.lat, extracted.lon));
+                else setUtm(null);
             };
 
-            // --- Handlers ---
+            const handlePaste = async () => {
+                try {
+                    const text = await navigator.clipboard.readText();
+                    handleLinkChange(text);
+                } catch (err) { alert('Browser blocked paste. Please use Ctrl+V'); }
+            };
+
             const handleFileUpload = (e) => {
+                // ... (Keep existing upload logic)
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
@@ -264,63 +281,30 @@
                         const ws = wb.Sheets[wb.SheetNames[0]];
                         const json = XLSX.utils.sheet_to_json(ws); 
                         if (!json.length) throw new Error("Empty file");
-
                         const processed = json.map((row, idx) => {
                             const newRow = {};
-                            Object.keys(row).forEach(key => {
-                                let safeKey = key.trim(); 
-                                newRow[safeKey] = row[key];
-                            });
+                            Object.keys(row).forEach(key => { newRow[key.trim()] = row[key]; });
                             newRow.UniqueID = idx;
                             return newRow;
                         });
-
-                        window.firebase.database().ref('masterReference').set({
-                            fileName: file.name,
-                            data: processed,
-                            updatedAt: new Date().toISOString()
-                        }).then(() => showAlert("تم رفع الملف المرجعي الجديد بنجاح"));
-                    } catch (err) { showAlert("خطأ في قراءة الملف: " + err.message, 'error'); }
+                        window.firebase.database().ref('masterReference').set({ fileName: file.name, data: processed, updatedAt: new Date().toISOString() })
+                            .then(() => showAlert("تم تحديث قاعدة البيانات"));
+                    } catch (err) { showAlert("خطأ: " + err.message, 'error'); }
                 };
                 reader.readAsArrayBuffer(file);
             };
 
-            const handleLogin = (e) => {
-                e.preventDefault();
-                if (passInput === 'admin123') {
-                    setIsAdmin(true); setShowLogin(false); showAlert("تم تسجيل الدخول كمسؤول");
-                } else { showAlert("كلمة المرور غير صحيحة", 'error'); }
-            };
-
-            const handleLinkChange = (val) => {
-                setGMapLink(val);
-                const extracted = extractCoordinates(val);
-                setCoords(extracted);
-                
-                if (extracted) {
-                    const utmVal = convertToUTM(extracted.lat, extracted.lon);
-                    setUtm(utmVal);
-                } else {
-                    setUtm(null);
-                }
-            };
-
             const handleSubmit = (e) => {
                 e.preventDefault();
-                if (!coords || selIndex === '') {
-                    showAlert("تأكد من اختيار العميل وإحداثيات صحيحة", 'error');
-                    return;
-                }
-
-                const masterRecord = refData[parseInt(selIndex)];
-                const norm = normalizeKeys(masterRecord);
-
+                if (!coords || selIndex === '') return showAlert("بيانات ناقصة", 'error');
+                
+                const norm = selectedItem;
                 const payload = {
-                    masterRefId: masterRecord.UniqueID,
+                    masterRefId: norm.UniqueID,
                     clientName: norm.clientName,
-                    commercialCode: norm.commercialCode, 
+                    commercialCode: norm.commercialCode,
                     petroCode: norm.petroCode,
-                    crn: norm.crn, 
+                    crn: norm.crn,
                     activity: norm.activity,
                     governorate: norm.governorate,
                     latitude: coords.lat.toFixed(6),
@@ -332,270 +316,271 @@
                 };
 
                 const db = window.firebase.database();
-                if (editId) {
-                    db.ref(`collectedLocations/${editId}`).update(payload)
-                        .then(() => { showAlert("تم تعديل البيانات"); resetForm(); });
-                } else {
-                    db.ref('collectedLocations').push(payload)
-                        .then(() => { showAlert("تم حفظ الموقع"); resetForm(); });
-                }
+                const promise = editId ? db.ref(`collectedLocations/${editId}`).update(payload) : db.ref('collectedLocations').push(payload);
+                promise.then(() => { showAlert(editId ? "تم التحديث" : "تم الحفظ"); resetForm(); });
             };
 
-            const resetForm = () => {
-                setSelIndex(''); setGMapLink(''); setCoords(null); setUtm(null); setEditId(null);
-            };
-
+            const resetForm = () => { setSelIndex(''); setGMapLink(''); setCoords(null); setUtm(null); setEditId(null); setSearchTerm(''); };
             const handleEdit = (rec) => {
                 setEditId(rec.firebaseId);
                 const idx = refData.findIndex(r => r.UniqueID === rec.masterRefId);
                 setSelIndex(idx.toString());
-                const r = refData[idx];
-                const norm = normalizeKeys(r);
-                setSelGov(norm.governorate);
-                setGMapLink(`${rec.latitude}, ${rec.longitude}`);
-                setCoords({ lat: parseFloat(rec.latitude), lon: parseFloat(rec.longitude) });
-                
-                if (rec.utmX && rec.utmY) {
-                    setUtm({ x: parseFloat(rec.utmX), y: parseFloat(rec.utmY) });
-                } else {
-                    const u = convertToUTM(parseFloat(rec.latitude), parseFloat(rec.longitude));
-                    setUtm(u);
-                }
-                
+                setSelGov(normalizeKeys(refData[idx]).governorate);
+                handleLinkChange(`${rec.latitude}, ${rec.longitude}`);
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             };
-
-            const handleDelete = (id) => {
-                if(confirm("حذف هذا السجل؟")) window.firebase.database().ref(`collectedLocations/${id}`).remove();
-            };
-
+            const handleDelete = (id) => { if(confirm("حذف؟")) window.firebase.database().ref(`collectedLocations/${id}`).remove(); };
+            
             const exportExcel = () => {
                 const map = {};
                 collected.forEach(c => map[c.masterRefId] = c);
-
                 const output = refData.map(row => {
                     const c = map[row.UniqueID];
-                    return {
-                        ...row,
-                        'Lat (WGS84)': c ? c.latitude : '',
-                        'Lon (WGS84)': c ? c.longitude : '',
-                        'UTM X (36N)': c ? c.utmX : '',
-                        'UTM Y (36N)': c ? c.utmY : '',
-                        'Collection_Date': c ? new Date(c.timestamp).toLocaleDateString('ar-EG') : ''
-                    };
+                    return { ...row, 'Lat': c?.latitude||'', 'Lon': c?.longitude||'', 'UTM_X': c?.utmX||'', 'UTM_Y': c?.utmY||'', 'Date': c ? new Date(c.timestamp).toLocaleDateString() : '' };
                 });
-
                 const ws = XLSX.utils.json_to_sheet(output);
                 const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "Data_UTM36N");
-                XLSX.writeFile(wb, "Gasco_Locations_UTM.xlsx");
+                XLSX.utils.book_append_sheet(wb, ws, "Data");
+                XLSX.writeFile(wb, "Gasco_Smart_Export.xlsx");
             };
-
-            const exportGeoJSON = () => {
-                const features = collected.map(c => ({
-                    type: "Feature",
-                    geometry: { type: "Point", coordinates: [parseFloat(c.longitude), parseFloat(c.latitude)] },
-                    properties: { name: c.clientName, sapCode: c.commercialCode, gov: c.governorate, activity: c.activity }
-                }));
-                const geo = { type: "FeatureCollection", features };
-                const blob = new Blob([JSON.stringify(geo)], {type: "application/json"});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url; a.download = "locations.geojson";
-                a.click();
-            };
-
-            // --- Derived State ---
-            const govs = useMemo(() => {
-                const s = new Set();
-                refData.forEach(r => {
-                    const val = r[COLS.GOV];
-                    if(val) s.add(val.toString().trim());
-                });
-                return Array.from(s).sort();
-            }, [refData]);
-
-            const filteredClients = useMemo(() => {
-                if (!selGov) return [];
-                const collectedIds = new Set(collected.map(c => c.masterRefId));
-                return refData
-                    .map((r, i) => ({ ...normalizeKeys(r), originalIndex: i }))
-                    .filter(r => r.governorate.toString().trim() === selGov)
-                    .map(r => ({ ...r, isDone: collectedIds.has(r.UniqueID) }));
-            }, [selGov, refData, collected]);
-
-            const pendingList = useMemo(() => {
-                const collectedIds = new Set(collected.map(c => c.masterRefId));
-                return refData.map(r => normalizeKeys(r)).filter(r => !collectedIds.has(r.id));
-            }, [refData, collected]);
-
-            const selectedItem = useMemo(() => {
-                if (selIndex === '') return null;
-                return normalizeKeys(refData[parseInt(selIndex)]);
-            }, [selIndex, refData]);
 
             // --- Render ---
             return e(React.Fragment, null,
-                e(Header, { title: "نظام جمع إحداثيات العملاء - الجديد", count: `${collected.length} / ${refData.length}` }),
-                
-                showLogin && e('div', { className: "fixed inset-0 bg-black/50 flex items-center justify-center z-50" },
-                    e('div', { className: "bg-white p-6 rounded-lg shadow-xl w-96" },
-                        e('h2', { className: "text-lg font-bold mb-4" }, "دخول المشرف"),
-                        e('form', { onSubmit: handleLogin },
-                            e('input', { type: "password", className: "w-full border p-2 rounded mb-4", placeholder: "كلمة المرور", value: passInput, onChange: e => setPassInput(e.target.value) }),
-                            e('div', { className: "flex justify-end gap-2" },
-                                e('button', { type: "button", onClick: () => setShowLogin(false), className: "btn btn-secondary" }, "إلغاء"),
-                                e('button', { type: "submit", className: "btn btn-primary" }, "دخول")
-                            )
-                        )
-                    )
-                ),
-
-                qrData && e('div', { className: "fixed inset-0 bg-black/60 flex items-center justify-center z-50", onClick: () => setQrData(null) },
-                    e('div', { className: "bg-white p-8 rounded-xl shadow-2xl text-center printable-area", onClick: e => e.stopPropagation() },
-                        e('h3', { className: "text-xl font-bold mb-2 text-slate-800" }, qrData.clientName),
-                        e('p', { className: "text-sm text-slate-500 mb-4" }, `SAP: ${qrData.commercialCode} | Act: ${qrData.activity}`),
-                        e('canvas', { id: "qr-canvas", className: "mx-auto border p-2 rounded" }),
-                        e('div', { className: "mt-4 text-sm font-mono text-slate-600 text-left dir-ltr" },
-                            e('div', null, `Lat: ${qrData.latitude}`),
-                            e('div', null, `Lon: ${qrData.longitude}`),
-                            e('div', { className: "mt-1 pt-1 border-t" }, `X: ${qrData.utmX}`),
-                            e('div', null, `Y: ${qrData.utmY}`)
+                // Navbar
+                e('nav', { className: "bg-slate-900 text-white sticky top-0 z-40 shadow-lg" },
+                    e('div', { className: "container mx-auto px-4 py-3 flex justify-between items-center" },
+                        e('div', { className: "flex items-center gap-3" },
+                            e('div', { className: "w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold" }, "G"),
+                            e('h1', { className: "text-lg font-bold tracking-wide" }, "GASCO Smart Collector")
                         ),
-                        e('div', { className: "mt-6 flex justify-center gap-2 no-print" },
-                            e('button', { className: "btn btn-secondary", onClick: () => setQrData(null) }, "إغلاق"),
-                            e('button', { className: "btn btn-primary", onClick: () => window.print() }, "طباعة")
-                        )
+                        e('button', { 
+                            onClick: () => isAdmin ? setIsAdmin(false) : setShowLogin(true),
+                            className: "text-xs font-semibold bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-full transition-colors"
+                        }, isAdmin ? "Admin Mode" : "Login")
                     )
                 ),
 
-                e('div', { className: "container mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-6" },
-                    e('div', { className: "lg:col-span-1 space-y-6" },
-                        alert && e(Alert, { message: alert.message, type: alert.type }),
+                // Main Content
+                e('div', { className: "container mx-auto p-4 max-w-7xl" },
+                    
+                    // Stats Row
+                    e('div', { className: "grid grid-cols-2 md:grid-cols-4 gap-4 mb-6" },
+                        e(StatsCard, { title: "إجمالي العملاء", value: refData.length, icon: "fa-database", color: "bg-blue-500" }),
+                        e(StatsCard, { title: "تم الجمع", value: collected.length, icon: "fa-check-circle", color: "bg-emerald-500" }),
+                        e(StatsCard, { title: "المتبقي", value: refData.length - collected.length, icon: "fa-clock", color: "bg-amber-500" }),
+                        e(StatsCard, { title: "نسبة الإنجاز", value: `${Math.round((collected.length/refData.length)*100 || 0)}%`, icon: "fa-chart-pie", color: "bg-purple-500" })
+                    ),
 
-                        e('div', { className: "bg-white p-6 rounded-xl shadow-sm border border-slate-100" },
-                            e('div', { className: "flex justify-between items-center mb-4" },
-                                e('h2', { className: "font-bold text-lg text-slate-700" }, "إدخال البيانات"),
-                                !isAdmin ? 
-                                    e('button', { onClick: () => setShowLogin(true), className: "text-sm text-blue-600 font-semibold" }, "دخول مشرف") :
-                                    e('button', { onClick: () => setIsAdmin(false), className: "text-sm text-red-600" }, "خروج")
-                            ),
+                    e('div', { className: "grid grid-cols-1 lg:grid-cols-12 gap-6" },
+                        
+                        // LEFT COLUMN: Input Form
+                        e('div', { className: "lg:col-span-4 space-y-4" },
+                            alert && e('div', { className: `p-3 rounded-lg text-sm font-semibold text-center fade-in ${alert.type === 'error' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}` }, alert.message),
 
-                            isAdmin && e('div', { className: "mb-6 p-4 bg-slate-50 rounded-lg border border-dashed border-slate-300" },
-                                e('label', { className: "block text-sm font-medium text-slate-700 mb-2" }, "تحديث قاعدة البيانات (Excel)"),
-                                e('input', { type: "file", accept: ".xlsx", onChange: handleFileUpload, className: "block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" }),
-                                fileName && e('p', { className: "text-xs text-green-600 mt-2" }, `الملف الحالي: ${fileName}`)
-                            ),
-
-                            refData.length > 0 ? e('form', { onSubmit: handleSubmit, className: "space-y-4" },
-                                e('div', null,
-                                    e('label', { className: "block text-sm font-medium mb-1" }, "1. المحافظة"),
-                                    e('select', { className: "w-full p-2 border rounded bg-slate-50", value: selGov, onChange: e => { setSelGov(e.target.value); setSelIndex(''); } },
-                                        e('option', { value: "" }, "-- اختر المحافظة --"),
+                            e('div', { className: "glass-panel rounded-xl p-5" },
+                                e('div', { className: "flex justify-between items-center mb-4" },
+                                    e('h2', { className: "font-bold text-slate-800 flex items-center gap-2" }, 
+                                        e('i', { className: "fa-solid fa-location-dot text-blue-600" }), "تسجيل موقع"
+                                    ),
+                                    selGov && e('span', { className: "text-xs font-mono bg-slate-100 px-2 py-1 rounded" }, `${govStats.done}/${govStats.total}`)
+                                ),
+                                
+                                // 1. Governorate Select
+                                e('div', { className: "mb-4" },
+                                    e('label', { className: "text-xs font-bold text-slate-500 uppercase mb-1 block" }, "1. المحافظة"),
+                                    e('select', { 
+                                        className: "w-full p-2.5 rounded-lg border border-slate-300 bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none transition-all",
+                                        value: selGov,
+                                        onChange: e => { setSelGov(e.target.value); setSelIndex(''); setSearchTerm(''); }
+                                    },
+                                        e('option', { value: "" }, "اختر المحافظة..."),
                                         govs.map(g => e('option', { key: g, value: g }, g))
+                                    ),
+                                    selGov && e(ProgressBar, { total: govStats.total, current: govStats.done })
+                                ),
+
+                                // 2. Smart Client Search
+                                e('div', { className: `mb-4 transition-opacity ${!selGov ? 'opacity-50 pointer-events-none' : 'opacity-100'}` },
+                                    e('label', { className: "text-xs font-bold text-slate-500 uppercase mb-1 block" }, "2. العميل"),
+                                    
+                                    // Search Box
+                                    e('div', { className: "relative mb-2" },
+                                        e('i', { className: "fa-solid fa-search absolute left-3 top-3 text-slate-400 text-sm" }),
+                                        e('input', {
+                                            type: "text",
+                                            placeholder: "بحث بالاسم أو الكود أو النشاط...",
+                                            className: "w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none",
+                                            value: searchTerm,
+                                            onChange: e => setSearchTerm(e.target.value)
+                                        })
+                                    ),
+
+                                    // Filtered List
+                                    e('div', { className: "max-h-48 overflow-y-auto border border-slate-200 rounded-lg bg-white" },
+                                        filteredClients.length === 0 ? 
+                                            e('div', { className: "p-3 text-center text-xs text-slate-400" }, "لا يوجد نتائج") :
+                                            filteredClients.map(c => 
+                                                e('div', { 
+                                                    key: c.originalIndex,
+                                                    onClick: () => setSelIndex(c.originalIndex.toString()),
+                                                    className: `p-2 text-sm cursor-pointer border-b last:border-0 hover:bg-blue-50 transition-colors ${selIndex === c.originalIndex.toString() ? 'bg-blue-100 border-l-4 border-l-blue-500' : ''}`
+                                                }, 
+                                                    e('div', { className: "flex justify-between" },
+                                                        e('span', { className: "font-semibold text-slate-700" }, c.clientName),
+                                                        c.isDone && e('i', { className: "fa-solid fa-check text-green-500" })
+                                                    ),
+                                                    e('div', { className: "text-xs text-slate-400 mt-1" }, `${c.commercialCode} | ${c.activity}`)
+                                                )
+                                            )
                                     )
                                 ),
-                                e('div', null,
-                                    e('label', { className: "block text-sm font-medium mb-1" }, "2. العميل"),
-                                    e('select', { className: "w-full p-2 border rounded bg-slate-50", disabled: !selGov, value: selIndex, onChange: e => setSelIndex(e.target.value) },
-                                        e('option', { value: "" }, "-- اختر العميل --"),
-                                        filteredClients.map(c => 
-                                            e('option', { key: c.originalIndex, value: c.originalIndex, className: c.isDone ? 'text-green-600' : '' }, 
-                                                `${c.isDone ? '✓ ' : ''}${c.clientName} - ${c.activity} (${c.commercialCode})`
+
+                                // Selected Details Card
+                                selectedItem && e('div', { className: "bg-gradient-to-br from-slate-50 to-blue-50 border border-blue-100 p-4 rounded-xl mb-4 fade-in" },
+                                    e('div', { className: "grid grid-cols-2 gap-y-2 text-sm" },
+                                        e('div', null, e('span', { className: "text-slate-500 text-xs block" }, "SAP Code"), e('span', { className: "font-mono font-bold text-slate-700" }, selectedItem.commercialCode)),
+                                        e('div', null, e('span', { className: "text-slate-500 text-xs block" }, "CRN"), e('span', { className: "font-mono font-bold text-indigo-600" }, selectedItem.crn)),
+                                        e('div', { className: "col-span-2" }, e('span', { className: "text-slate-500 text-xs block" }, "النشاط"), e('span', { className: "font-medium" }, selectedItem.activity))
+                                    )
+                                ),
+
+                                // 3. Smart Location Input
+                                e('div', { className: "mb-4" },
+                                    e('label', { className: "text-xs font-bold text-slate-500 uppercase mb-1 block" }, "3. الموقع"),
+                                    e('div', { className: "flex gap-2" },
+                                        e('div', { className: "relative flex-1" },
+                                            e('input', { 
+                                                type: "text", 
+                                                className: "w-full pl-3 pr-10 py-2.5 rounded-lg border border-slate-300 text-sm font-mono dir-ltr focus:ring-2 focus:ring-blue-500 outline-none",
+                                                placeholder: "Link or 30.123, 31.456",
+                                                value: gMapLink,
+                                                onChange: e => handleLinkChange(e.target.value)
+                                            }),
+                                            e('button', { 
+                                                onClick: handlePaste,
+                                                className: "absolute right-2 top-2 text-slate-400 hover:text-blue-600 p-1",
+                                                title: "Paste"
+                                            }, e('i', { className: "fa-regular fa-paste" }))
+                                        )
+                                    ),
+                                    // Coordinates Preview
+                                    coords ? 
+                                        e('div', { className: "mt-2 p-2 bg-green-50 border border-green-200 rounded-lg flex justify-between items-center fade-in" },
+                                            e('div', { className: "text-xs font-mono text-green-800" }, 
+                                                e('i', { className: "fa-solid fa-map-pin mr-1" }),
+                                                `${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}`
+                                            ),
+                                            e('a', { 
+                                                href: `https://www.google.com/maps?q=${coords.lat},${coords.lon}`,
+                                                target: "_blank",
+                                                className: "text-xs bg-white px-2 py-1 rounded shadow-sm text-green-700 hover:text-green-900 font-bold"
+                                            }, "Check Map ↗")
+                                        ) : 
+                                        e('p', { className: "text-[10px] text-slate-400 mt-1" }, "Supports: Maps Links, Plus Codes, or Lat,Lon")
+                                ),
+
+                                e('button', {
+                                    onClick: handleSubmit,
+                                    disabled: !coords || !selIndex,
+                                    className: "w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-md shadow-blue-200 transition-all active:scale-95 flex justify-center items-center gap-2"
+                                }, 
+                                    editId ? "تحديث البيانات" : "حفظ الموقع",
+                                    e('i', { className: "fa-solid fa-paper-plane" })
+                                )
+                            ),
+                            
+                            isAdmin && e('div', { className: "p-4 border-2 border-dashed border-slate-300 rounded-xl text-center hover:bg-slate-50 transition-colors cursor-pointer relative" },
+                                e('input', { type: "file", className: "absolute inset-0 opacity-0 cursor-pointer", onChange: handleFileUpload }),
+                                e('i', { className: "fa-solid fa-cloud-upload-alt text-2xl text-slate-400 mb-2" }),
+                                e('p', { className: "text-sm text-slate-600 font-medium" }, "تحديث قاعدة البيانات (Excel)"),
+                                e('p', { className: "text-xs text-slate-400" }, "Drag & drop or click to upload")
+                            )
+                        ),
+
+                        // RIGHT COLUMN: Data Table
+                        e('div', { className: "lg:col-span-8" },
+                            e('div', { className: "glass-panel rounded-xl overflow-hidden flex flex-col h-[600px]" },
+                                // Toolbar
+                                e('div', { className: "p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50" },
+                                    e('div', { className: "flex bg-slate-200 p-1 rounded-lg" },
+                                        ['pending', 'collected'].map(tab => 
+                                            e('button', {
+                                                key: tab,
+                                                onClick: () => setActiveTab(tab),
+                                                className: `px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`
+                                            }, tab === 'pending' ? "المتبقي" : "تم الجمع")
+                                        )
+                                    ),
+                                    e('button', { onClick: exportExcel, className: "text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors" }, 
+                                        e('i', { className: "fa-solid fa-file-excel mr-2" }), "تصدير"
+                                    )
+                                ),
+                                
+                                // Table Content
+                                e('div', { className: "flex-1 overflow-auto" },
+                                    e('table', { className: "w-full text-right" },
+                                        e('thead', { className: "bg-slate-50 sticky top-0 z-10" },
+                                            e('tr', null,
+                                                e('th', { className: "p-3 text-xs font-bold text-slate-500" }, "#"),
+                                                e('th', { className: "p-3 text-xs font-bold text-slate-500" }, "العميل"),
+                                                e('th', { className: "p-3 text-xs font-bold text-slate-500" }, "CRN / SAP"),
+                                                e('th', { className: "p-3 text-xs font-bold text-slate-500" }, "المحافظة"),
+                                                activeTab === 'collected' && e('th', { className: "p-3 text-xs font-bold text-slate-500" }, "إجراءات")
+                                            )
+                                        ),
+                                        e('tbody', { className: "divide-y divide-slate-100" },
+                                            (activeTab === 'collected' ? collected : filteredClients.filter(c => !c.isDone)).slice(0, 100).map((row, i) => 
+                                                e('tr', { key: i, className: "hover:bg-blue-50/50 transition-colors" },
+                                                    e('td', { className: "p-3 text-xs text-slate-400 font-mono" }, i + 1),
+                                                    e('td', { className: "p-3" },
+                                                        e('div', { className: "font-semibold text-sm text-slate-700" }, row.clientName),
+                                                        e('div', { className: "text-xs text-slate-400" }, row.activity)
+                                                    ),
+                                                    e('td', { className: "p-3" },
+                                                        e('span', { className: "bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-xs font-mono" }, row.commercialCode)
+                                                    ),
+                                                    e('td', { className: "p-3 text-sm text-slate-600" }, row.governorate),
+                                                    activeTab === 'collected' && e('td', { className: "p-3 flex gap-2" },
+                                                        e('button', { onClick: () => setQrData(row), className: "w-8 h-8 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition-colors" }, e('i', { className: "fa-solid fa-qrcode" })),
+                                                        e('button', { onClick: () => handleEdit(row), className: "w-8 h-8 rounded-full bg-amber-50 text-amber-600 hover:bg-amber-100 flex items-center justify-center transition-colors" }, e('i', { className: "fa-solid fa-pen" })),
+                                                        isAdmin && e('button', { onClick: () => handleDelete(row.firebaseId), className: "w-8 h-8 rounded-full bg-red-50 text-red-600 hover:bg-red-100 flex items-center justify-center transition-colors" }, e('i', { className: "fa-solid fa-trash" }))
+                                                    )
+                                                )
                                             )
                                         )
                                     )
-                                ),
-
-                                selectedItem && e('div', { className: "bg-blue-50 p-3 rounded text-sm text-blue-800 space-y-1" },
-                                    e('p', null, e('span', { className: "font-bold" }, "SAP كود: "), selectedItem.commercialCode),
-                                    e('p', null, e('span', { className: "font-bold" }, "كود بتروتريد: "), selectedItem.petroCode),
-                                    e('p', null, e('span', { className: "font-bold text-indigo-700" }, "السجل التجاري (CRN): "), e('span', { className: "font-mono font-bold text-indigo-700" }, selectedItem.crn)),
-                                    e('p', null, e('span', { className: "font-bold" }, "النشاط: "), selectedItem.activity),
-                                    e('p', null, e('span', { className: "font-bold" }, "كميات الغاز: "), selectedItem.capacity),
-                                    e('p', null, e('span', { className: "font-bold" }, "بداية العقد: "), selectedItem.startDate)
-                                ),
-
-                                e('div', null,
-                                    e('label', { className: "block text-sm font-medium mb-1" }, "3. الموقع (رابط أو إحداثيات)"),
-                                    e('input', { type: "text", className: "w-full p-2 border rounded text-left dir-ltr", placeholder: "Paste Link OR Coords (30.12, 31.45)", value: gMapLink, onChange: (e) => handleLinkChange(e.target.value) }),
-                                    e('p', { className: "text-xs text-slate-500 mt-1" }, "يدعم: Google Maps Links أو (Latitude, Longitude) مباشرة.")
-                                ),
-
-                                coords && e('div', { className: "space-y-2" },
-                                    e('div', { className: "bg-green-50 text-green-800 p-2 rounded text-center text-sm font-mono border border-green-200" }, 
-                                        e('div', {className: "font-bold text-xs text-green-600 uppercase"}, "Geographic (WGS84)"),
-                                        `Lat: ${coords.lat.toFixed(6)}`, e('br'), `Lon: ${coords.lon.toFixed(6)}`
-                                    ),
-                                    utm && e('div', { className: "bg-indigo-50 text-indigo-800 p-2 rounded text-center text-sm font-mono border border-indigo-200" }, 
-                                        e('div', {className: "font-bold text-xs text-indigo-600 uppercase"}, "Projected (UTM 36N)"),
-                                        `X: ${utm.x.toFixed(2)}`, e('br'), `Y: ${utm.y.toFixed(2)}`
-                                    )
-                                ),
-
-                                e('button', { type: "submit", disabled: !coords || selIndex === '', className: "w-full btn btn-primary mt-2" }, editId ? "تحديث البيانات" : "حفظ الموقع")
-                            ) : e('div', { className: "text-center py-8 text-slate-500" }, "جاري تحميل البيانات...")
-                        )
-                    ),
-
-                    e('div', { className: "lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden" },
-                        e('div', { className: "p-4 border-b flex flex-col sm:flex-row justify-between items-center gap-4" },
-                            e('div', { className: "flex gap-4" },
-                                e('button', { onClick: () => setActiveTab('pending'), className: activeTab === 'pending' ? 'tab-button tab-button-active' : 'tab-button tab-button-inactive' }, `المتبقي (${pendingList.length})`),
-                                e('button', { onClick: () => setActiveTab('collected'), className: activeTab === 'collected' ? 'tab-button tab-button-active' : 'tab-button tab-button-inactive' }, `تم الجمع (${collected.length})`)
-                            ),
-                            e('div', { className: "flex gap-2" },
-                                e('button', { onClick: exportExcel, disabled: !collected.length, className: "btn btn-export text-xs" }, "XLSX تصدير"),
-                                isAdmin && e('button', { onClick: exportGeoJSON, disabled: !collected.length, className: "btn btn-secondary text-xs" }, "GeoJSON")
+                                )
                             )
-                        ),
-
-                        e('div', { className: "overflow-x-auto" },
-                            activeTab === 'collected' ?
-                                (collected.length === 0 ? e('div', { className: "p-8 text-center text-slate-500" }, "لا توجد سجلات مجمعة بعد") :
-                                e('table', { className: "w-full text-right" },
-                                    e('thead', null, e('tr', null,
-                                        e('th', { className: "table-header-cell" }, "العميل"),
-                                        e('th', { className: "table-header-cell" }, "SAP كود"),
-                                        e('th', { className: "table-header-cell" }, "UTM X"),
-                                        e('th', { className: "table-header-cell" }, "UTM Y"),
-                                        e('th', { className: "table-header-cell" }, "إجراءات")
-                                    )),
-                                    e('tbody', null,
-                                        collected.map(row => e('tr', { key: row.firebaseId, className: "hover:bg-slate-50" },
-                                            e('td', { className: "table-body-cell font-medium" }, row.clientName),
-                                            e('td', { className: "table-body-cell" }, row.commercialCode),
-                                            e('td', { className: "table-body-cell text-xs font-mono" }, row.utmX || '-'),
-                                            e('td', { className: "table-body-cell text-xs font-mono" }, row.utmY || '-'),
-                                            e('td', { className: "table-body-cell flex gap-2" },
-                                                e('button', { onClick: () => setQrData(row), className: "text-blue-600 hover:underline" }, "QR"),
-                                                e('button', { onClick: () => handleEdit(row), className: "text-yellow-600 hover:underline" }, "تعديل"),
-                                                isAdmin && e('button', { onClick: () => handleDelete(row.firebaseId), className: "text-red-600 hover:underline" }, "حذف")
-                                            )
-                                        ))
-                                    )
-                                ))
-                            :
-                                (pendingList.length === 0 ? e('div', { className: "p-8 text-center text-green-600 font-bold" }, "تم الانتهاء من جميع المواقع!") :
-                                e('table', { className: "w-full text-right" },
-                                    e('thead', null, e('tr', null,
-                                        e('th', { className: "table-header-cell" }, "م"),
-                                        e('th', { className: "table-header-cell" }, "العميل"),
-                                        e('th', { className: "table-header-cell" }, "النشاط"),
-                                        e('th', { className: "table-header-cell" }, "المحافظة"),
-                                        e('th', { className: "table-header-cell" }, "SAP كود")
-                                    )),
-                                    e('tbody', null,
-                                        pendingList.slice(0, 100).map((row, i) => e('tr', { key: i, className: "hover:bg-slate-50" },
-                                            e('td', { className: "table-body-cell text-slate-400" }, i + 1),
-                                            e('td', { className: "table-body-cell font-medium" }, row.clientName),
-                                            e('td', { className: "table-body-cell text-sm" }, row.activity),
-                                            e('td', { className: "table-body-cell" }, row.governorate),
-                                            e('td', { className: "table-body-cell" }, row.commercialCode)
-                                        ))
-                                    )
-                                ))
                         )
+                    )
+                ),
+
+                // Modals
+                showLogin && e('div', { className: "fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 fade-in" },
+                    e('div', { className: "bg-white p-8 rounded-2xl shadow-2xl w-96 text-center" },
+                        e('h2', { className: "text-xl font-bold mb-6" }, "Admin Login"),
+                        e('input', { type: "password", className: "w-full p-3 border rounded-xl mb-4 focus:ring-2 focus:ring-blue-500 outline-none", placeholder: "Password", value: passInput, onChange: e => setPassInput(e.target.value) }),
+                        e('div', { className: "flex gap-2" },
+                            e('button', { onClick: () => setShowLogin(false), className: "flex-1 py-2 text-slate-500 hover:bg-slate-100 rounded-lg" }, "Cancel"),
+                            e('button', { onClick: (e) => { e.preventDefault(); if(passInput==='admin123') { setIsAdmin(true); setShowLogin(false); } else alert('Wrong!'); }, className: "flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold" }, "Login")
+                        )
+                    )
+                ),
+
+                qrData && e('div', { className: "fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4", onClick: () => setQrData(null) },
+                    e('div', { className: "bg-white p-6 rounded-3xl shadow-2xl max-w-sm w-full text-center printable-area", onClick: e => e.stopPropagation() },
+                        e('div', { className: "w-16 h-1 bg-slate-200 rounded-full mx-auto mb-6" }),
+                        e('h3', { className: "text-lg font-bold text-slate-800" }, qrData.clientName),
+                        e('div', { className: "bg-slate-50 rounded-xl p-4 my-4" },
+                            e('canvas', { id: "qr-canvas", className: "mx-auto mix-blend-multiply" })
+                        ),
+                        e('div', { className: "grid grid-cols-2 gap-2 text-sm text-left font-mono text-slate-600 bg-slate-50 p-3 rounded-lg" },
+                            e('div', null, `LAT: ${qrData.latitude}`),
+                            e('div', null, `LON: ${qrData.longitude}`),
+                            e('div', null, `X: ${qrData.utmX}`),
+                            e('div', null, `Y: ${qrData.utmY}`)
+                        ),
+                        e('button', { onClick: () => window.print(), className: "w-full mt-6 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-black transition-colors no-print" }, "Print Ticket")
                     )
                 )
             );
