@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GASCO Location Collector (With CRN)</title>
+    <title>GASCO Location Collector (Coords & Links)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
@@ -110,41 +110,49 @@
         }
 
         // =====================================================================================
-        // --- UTILITIES ---
+        // --- UTILITIES (UPDATED) ---
         // =====================================================================================
         function extractCoordinates(urlInput) {
             if (!urlInput) return null;
-            let url = decodeURIComponent(urlInput).replace(/\s/g, '');
+            // Remove spaces to handle "Lat, Lon" vs "Lat,Lon"
+            let input = decodeURIComponent(urlInput).replace(/\s/g, '');
+            
             const patterns = [
+                // 1. RAW COORDINATES: Matches "31.123,32.456" (Start to End)
+                /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/,
+                
+                // 2. Google Maps Link Patterns
                 /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/,
                 /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/,
                 /q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/,
                 /ll=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/
             ];
+
             for (const pattern of patterns) {
-                const match = url.match(pattern);
+                const match = input.match(pattern);
                 if (match && match.length >= 3) {
                     const lat = parseFloat(match[1]);
                     const lon = parseFloat(match[2]);
-                    if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90) return { lat, lon };
+                    // Validate basic range
+                    if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90) {
+                        return { lat, lon };
+                    }
                 }
             }
             return null;
         }
 
-        // --- NEW COLUMN MAPPING WITH CRN ---
         const COLS = {
             CLIENT: 'اسم_المنشأة',
             SAP_CODE: 'كود_ساب_إيجاس',
             PETRO_CODE: 'كود_بتروتريد',
-            CRN: 'CRN', // Added CRN
+            CRN: 'CRN', 
             GOV: 'gove_name',
             ACTIVITY: 'نوع_النشاط',
             CAPACITY: 'كميات_الغاز_الصادر__بها_موافقة',
             START_DATE: 'تاريخ_بداية_العقد'
         };
 
-        // Helper for Excel Dates
         const excelDateToJSDate = (serial) => {
             if (!serial) return '';
             if (typeof serial === 'string') return serial;
@@ -236,7 +244,7 @@
                     clientName: row[COLS.CLIENT] || 'Unknown',
                     commercialCode: row[COLS.SAP_CODE] || row[COLS.PETRO_CODE] || '_',
                     petroCode: row[COLS.PETRO_CODE] || '',
-                    crn: row[COLS.CRN] || '', // Extract CRN
+                    crn: row[COLS.CRN] || '', 
                     governorate: row[COLS.GOV] || 'Unknown',
                     activity: row[COLS.ACTIVITY] || '',
                     capacity: row[COLS.CAPACITY] || '',
@@ -300,7 +308,7 @@
             const handleSubmit = (e) => {
                 e.preventDefault();
                 if (!coords || selIndex === '') {
-                    showAlert("تأكد من اختيار العميل ورابط صحيح", 'error');
+                    showAlert("تأكد من اختيار العميل وإحداثيات صحيحة", 'error');
                     return;
                 }
 
@@ -312,7 +320,7 @@
                     clientName: norm.clientName,
                     commercialCode: norm.commercialCode, 
                     petroCode: norm.petroCode,
-                    crn: norm.crn, // Save CRN
+                    crn: norm.crn, 
                     activity: norm.activity,
                     governorate: norm.governorate,
                     latitude: coords.lat.toFixed(6),
@@ -344,7 +352,7 @@
                 const r = refData[idx];
                 const norm = normalizeKeys(r);
                 setSelGov(norm.governorate);
-                setGMapLink(`http://googleusercontent.com/maps.google.com/?q=${rec.latitude},${rec.longitude}`);
+                setGMapLink(`${rec.latitude}, ${rec.longitude}`);
                 setCoords({ lat: parseFloat(rec.latitude), lon: parseFloat(rec.longitude) });
                 
                 if (rec.utmX && rec.utmY) {
@@ -502,17 +510,16 @@
                                 selectedItem && e('div', { className: "bg-blue-50 p-3 rounded text-sm text-blue-800 space-y-1" },
                                     e('p', null, e('span', { className: "font-bold" }, "SAP كود: "), selectedItem.commercialCode),
                                     e('p', null, e('span', { className: "font-bold" }, "كود بتروتريد: "), selectedItem.petroCode),
-                                    // Added CRN display here
-                                    e('p', null, e('span', { className: "font-bold text-indigo-700" }, "CRN: "), e('span', { className: "font-mono font-bold text-indigo-700" }, selectedItem.crn)),
+                                    e('p', null, e('span', { className: "font-bold text-indigo-700" }, "السجل التجاري (CRN): "), e('span', { className: "font-mono font-bold text-indigo-700" }, selectedItem.crn)),
                                     e('p', null, e('span', { className: "font-bold" }, "النشاط: "), selectedItem.activity),
                                     e('p', null, e('span', { className: "font-bold" }, "كميات الغاز: "), selectedItem.capacity),
                                     e('p', null, e('span', { className: "font-bold" }, "بداية العقد: "), selectedItem.startDate)
                                 ),
 
                                 e('div', null,
-                                    e('label', { className: "block text-sm font-medium mb-1" }, "3. رابط Google Maps"),
-                                    e('input', { type: "text", className: "w-full p-2 border rounded", placeholder: "الصق الرابط الكامل هنا...", value: gMapLink, onChange: (e) => handleLinkChange(e.target.value) }),
-                                    e('p', { className: "text-xs text-slate-500 mt-1" }, "يدعم الروابط المباشرة (place, search, pin).")
+                                    e('label', { className: "block text-sm font-medium mb-1" }, "3. الموقع (رابط أو إحداثيات)"),
+                                    e('input', { type: "text", className: "w-full p-2 border rounded text-left dir-ltr", placeholder: "Paste Link OR Coords (30.12, 31.45)", value: gMapLink, onChange: (e) => handleLinkChange(e.target.value) }),
+                                    e('p', { className: "text-xs text-slate-500 mt-1" }, "يدعم: Google Maps Links أو (Latitude, Longitude) مباشرة.")
                                 ),
 
                                 coords && e('div', { className: "space-y-2" },
