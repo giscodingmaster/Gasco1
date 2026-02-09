@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GASCO Location Collector (New Schema)</title>
+    <title>GASCO Location Collector (With CRN)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
@@ -132,11 +132,12 @@
             return null;
         }
 
-        // --- NEW COLUMN MAPPING BASED ON PROVIDED SCHEMA ---
+        // --- NEW COLUMN MAPPING WITH CRN ---
         const COLS = {
             CLIENT: 'اسم_المنشأة',
             SAP_CODE: 'كود_ساب_إيجاس',
             PETRO_CODE: 'كود_بتروتريد',
+            CRN: 'CRN', // Added CRN
             GOV: 'gove_name',
             ACTIVITY: 'نوع_النشاط',
             CAPACITY: 'كميات_الغاز_الصادر__بها_موافقة',
@@ -195,8 +196,6 @@
             // --- Effects ---
             useEffect(() => {
                 const db = window.firebase.database();
-                // We use 'masterReference' node. If schema changed drastically, 
-                // you might want to clear old data or use a new node.
                 db.ref('masterReference').on('value', snap => {
                     const val = snap.val();
                     if (val && val.data) {
@@ -218,7 +217,6 @@
                     setTimeout(() => {
                         const canvas = document.getElementById('qr-canvas');
                         if (canvas && window.QRCode) {
-                            // Using SAP code and coords in QR
                             const qrContent = `Client:${qrData.commercialCode}\nLat:${qrData.latitude}\nLon:${qrData.longitude}`;
                             window.QRCode.toCanvas(canvas, qrContent, { width: 200 }, (err) => { if (err) console.error(err); });
                         }
@@ -233,12 +231,12 @@
             };
 
             const normalizeKeys = (row) => {
-                // Direct mapping based on new schema
                 return {
                     id: row['UniqueID'],
                     clientName: row[COLS.CLIENT] || 'Unknown',
                     commercialCode: row[COLS.SAP_CODE] || row[COLS.PETRO_CODE] || '_',
                     petroCode: row[COLS.PETRO_CODE] || '',
+                    crn: row[COLS.CRN] || '', // Extract CRN
                     governorate: row[COLS.GOV] || 'Unknown',
                     activity: row[COLS.ACTIVITY] || '',
                     capacity: row[COLS.CAPACITY] || '',
@@ -256,14 +254,12 @@
                     try {
                         const wb = XLSX.read(evt.target.result, { type: 'array' });
                         const ws = wb.Sheets[wb.SheetNames[0]];
-                        // raw: false ensures dates are parsed somewhat, but for safety lets keep raw values
                         const json = XLSX.utils.sheet_to_json(ws); 
                         if (!json.length) throw new Error("Empty file");
 
                         const processed = json.map((row, idx) => {
                             const newRow = {};
                             Object.keys(row).forEach(key => {
-                                // Clean keys just in case
                                 let safeKey = key.trim(); 
                                 newRow[safeKey] = row[key];
                             });
@@ -314,8 +310,9 @@
                 const payload = {
                     masterRefId: masterRecord.UniqueID,
                     clientName: norm.clientName,
-                    commercialCode: norm.commercialCode, // SAP Code
+                    commercialCode: norm.commercialCode, 
                     petroCode: norm.petroCode,
+                    crn: norm.crn, // Save CRN
                     activity: norm.activity,
                     governorate: norm.governorate,
                     latitude: coords.lat.toFixed(6),
@@ -404,7 +401,6 @@
             const govs = useMemo(() => {
                 const s = new Set();
                 refData.forEach(r => {
-                    // Normalize just to check key existence safely
                     const val = r[COLS.GOV];
                     if(val) s.add(val.toString().trim());
                 });
@@ -506,6 +502,8 @@
                                 selectedItem && e('div', { className: "bg-blue-50 p-3 rounded text-sm text-blue-800 space-y-1" },
                                     e('p', null, e('span', { className: "font-bold" }, "SAP كود: "), selectedItem.commercialCode),
                                     e('p', null, e('span', { className: "font-bold" }, "كود بتروتريد: "), selectedItem.petroCode),
+                                    // Added CRN display here
+                                    e('p', null, e('span', { className: "font-bold text-indigo-700" }, "السجل التجاري (CRN): "), e('span', { className: "font-mono font-bold text-indigo-700" }, selectedItem.crn)),
                                     e('p', null, e('span', { className: "font-bold" }, "النشاط: "), selectedItem.activity),
                                     e('p', null, e('span', { className: "font-bold" }, "كميات الغاز: "), selectedItem.capacity),
                                     e('p', null, e('span', { className: "font-bold" }, "بداية العقد: "), selectedItem.startDate)
