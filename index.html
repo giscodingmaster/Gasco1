@@ -3,21 +3,15 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GASCO Location Collector (UTM 36N)</title>
-    <!-- Tailwind CSS -->
+    <title>GASCO Location Collector (New Schema)</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- XLSX (SheetJS) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <!-- QRCode.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
-    <!-- Proj4js (For Coordinate Conversion) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
     
-    <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
 
-    <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -105,14 +99,12 @@
         // =====================================================================================
         // --- COORD CONVERSION SETUP (UTM Zone 36N) ---
         // =====================================================================================
-        // Define WGS84 and UTM 36N (Egypt)
         if (window.proj4) {
             window.proj4.defs("EPSG:32636", "+proj=utm +zone=36 +datum=WGS84 +units=m +no_defs");
         }
 
         function convertToUTM(lat, lon) {
             if (!window.proj4) return { x: 0, y: 0 };
-            // proj4 takes [lon, lat] and returns [x, y]
             const result = window.proj4("EPSG:4326", "EPSG:32636", [lon, lat]);
             return { x: result[0], y: result[1] };
         }
@@ -140,13 +132,25 @@
             return null;
         }
 
+        // --- NEW COLUMN MAPPING BASED ON PROVIDED SCHEMA ---
         const COLS = {
-            CLIENT: 'اسم العميل',
-            CODE: 'الكود التجارى',
-            POINT: 'نقطة',
-            GOV: 'المحافظة',
-            LINE: 'الخط الرئيسى',
-            CAPACITY: 'السعه'
+            CLIENT: 'اسم_المنشأة',
+            SAP_CODE: 'كود_ساب_إيجاس',
+            PETRO_CODE: 'كود_بتروتريد',
+            GOV: 'gove_name',
+            ACTIVITY: 'نوع_النشاط',
+            CAPACITY: 'كميات_الغاز_الصادر__بها_موافقة',
+            START_DATE: 'تاريخ_بداية_العقد'
+        };
+
+        // Helper for Excel Dates
+        const excelDateToJSDate = (serial) => {
+            if (!serial) return '';
+            if (typeof serial === 'string') return serial;
+            const utc_days  = Math.floor(serial - 25569);
+            const utc_value = utc_days * 86400;                                        
+            const date_info = new Date(utc_value * 1000);
+            return date_info.toLocaleDateString('ar-EG');
         };
 
         // =====================================================================================
@@ -181,7 +185,7 @@
             const [selIndex, setSelIndex] = useState('');
             const [gMapLink, setGMapLink] = useState('');
             const [coords, setCoords] = useState(null);
-            const [utm, setUtm] = useState(null); // New state for UTM
+            const [utm, setUtm] = useState(null);
             
             const [alert, setAlert] = useState(null);
             const [activeTab, setActiveTab] = useState('pending');
@@ -191,6 +195,8 @@
             // --- Effects ---
             useEffect(() => {
                 const db = window.firebase.database();
+                // We use 'masterReference' node. If schema changed drastically, 
+                // you might want to clear old data or use a new node.
                 db.ref('masterReference').on('value', snap => {
                     const val = snap.val();
                     if (val && val.data) {
@@ -212,8 +218,9 @@
                     setTimeout(() => {
                         const canvas = document.getElementById('qr-canvas');
                         if (canvas && window.QRCode) {
-                            const url = `https://www.google.com/maps?q=${qrData.latitude},${qrData.longitude}`;
-                            window.QRCode.toCanvas(canvas, url, { width: 200 }, (err) => { if (err) console.error(err); });
+                            // Using SAP code and coords in QR
+                            const qrContent = `Client:${qrData.commercialCode}\nLat:${qrData.latitude}\nLon:${qrData.longitude}`;
+                            window.QRCode.toCanvas(canvas, qrContent, { width: 200 }, (err) => { if (err) console.error(err); });
                         }
                     }, 100);
                 }
@@ -226,15 +233,16 @@
             };
 
             const normalizeKeys = (row) => {
-                const findKey = (sub) => Object.keys(row).find(k => k.indexOf(sub) !== -1);
+                // Direct mapping based on new schema
                 return {
                     id: row['UniqueID'],
-                    clientName: row[findKey(COLS.CLIENT)] || 'N/A',
-                    commercialCode: row[findKey(COLS.CODE)] || '_',
-                    receivingPoint: row[findKey(COLS.POINT)] || 'N/A',
-                    governorate: row[findKey(COLS.GOV)] || 'Unknown',
-                    mainLine: row[findKey(COLS.LINE)] || '',
-                    capacity: row[findKey(COLS.CAPACITY)] || '',
+                    clientName: row[COLS.CLIENT] || 'Unknown',
+                    commercialCode: row[COLS.SAP_CODE] || row[COLS.PETRO_CODE] || '_',
+                    petroCode: row[COLS.PETRO_CODE] || '',
+                    governorate: row[COLS.GOV] || 'Unknown',
+                    activity: row[COLS.ACTIVITY] || '',
+                    capacity: row[COLS.CAPACITY] || '',
+                    startDate: excelDateToJSDate(row[COLS.START_DATE]),
                     ...row 
                 };
             };
@@ -248,13 +256,15 @@
                     try {
                         const wb = XLSX.read(evt.target.result, { type: 'array' });
                         const ws = wb.Sheets[wb.SheetNames[0]];
-                        const json = XLSX.utils.sheet_to_json(ws);
+                        // raw: false ensures dates are parsed somewhat, but for safety lets keep raw values
+                        const json = XLSX.utils.sheet_to_json(ws); 
                         if (!json.length) throw new Error("Empty file");
 
                         const processed = json.map((row, idx) => {
                             const newRow = {};
                             Object.keys(row).forEach(key => {
-                                let safeKey = key.replace(/[.#$/\[\]]/g, '_').replace(/[\x00-\x1F\x7F]+/g, ' ').trim();
+                                // Clean keys just in case
+                                let safeKey = key.trim(); 
                                 newRow[safeKey] = row[key];
                             });
                             newRow.UniqueID = idx;
@@ -265,7 +275,7 @@
                             fileName: file.name,
                             data: processed,
                             updatedAt: new Date().toISOString()
-                        }).then(() => showAlert("تم رفع الملف المرجعي بنجاح"));
+                        }).then(() => showAlert("تم رفع الملف المرجعي الجديد بنجاح"));
                     } catch (err) { showAlert("خطأ في قراءة الملف: " + err.message, 'error'); }
                 };
                 reader.readAsArrayBuffer(file);
@@ -278,7 +288,6 @@
                 } else { showAlert("كلمة المرور غير صحيحة", 'error'); }
             };
 
-            // Updated Link Handler with UTM Calculation
             const handleLinkChange = (val) => {
                 setGMapLink(val);
                 const extracted = extractCoordinates(val);
@@ -305,8 +314,9 @@
                 const payload = {
                     masterRefId: masterRecord.UniqueID,
                     clientName: norm.clientName,
-                    commercialCode: norm.commercialCode,
-                    receivingPoint: norm.receivingPoint,
+                    commercialCode: norm.commercialCode, // SAP Code
+                    petroCode: norm.petroCode,
+                    activity: norm.activity,
                     governorate: norm.governorate,
                     latitude: coords.lat.toFixed(6),
                     longitude: coords.lon.toFixed(6),
@@ -337,10 +347,9 @@
                 const r = refData[idx];
                 const norm = normalizeKeys(r);
                 setSelGov(norm.governorate);
-                setGMapLink(`https://maps.google.com/?q=${rec.latitude},${rec.longitude}`);
+                setGMapLink(`http://googleusercontent.com/maps.google.com/?q=${rec.latitude},${rec.longitude}`);
                 setCoords({ lat: parseFloat(rec.latitude), lon: parseFloat(rec.longitude) });
                 
-                // Recalculate UTM or use stored
                 if (rec.utmX && rec.utmY) {
                     setUtm({ x: parseFloat(rec.utmX), y: parseFloat(rec.utmY) });
                 } else {
@@ -355,7 +364,6 @@
                 if(confirm("حذف هذا السجل؟")) window.firebase.database().ref(`collectedLocations/${id}`).remove();
             };
 
-            // Export with UTM
             const exportExcel = () => {
                 const map = {};
                 collected.forEach(c => map[c.masterRefId] = c);
@@ -382,7 +390,7 @@
                 const features = collected.map(c => ({
                     type: "Feature",
                     geometry: { type: "Point", coordinates: [parseFloat(c.longitude), parseFloat(c.latitude)] },
-                    properties: { name: c.clientName, code: c.commercialCode, gov: c.governorate, utmX: c.utmX, utmY: c.utmY }
+                    properties: { name: c.clientName, sapCode: c.commercialCode, gov: c.governorate, activity: c.activity }
                 }));
                 const geo = { type: "FeatureCollection", features };
                 const blob = new Blob([JSON.stringify(geo)], {type: "application/json"});
@@ -396,8 +404,9 @@
             const govs = useMemo(() => {
                 const s = new Set();
                 refData.forEach(r => {
-                    const n = normalizeKeys(r);
-                    if(n.governorate && n.governorate !== 'Unknown') s.add(n.governorate);
+                    // Normalize just to check key existence safely
+                    const val = r[COLS.GOV];
+                    if(val) s.add(val.toString().trim());
                 });
                 return Array.from(s).sort();
             }, [refData]);
@@ -407,7 +416,7 @@
                 const collectedIds = new Set(collected.map(c => c.masterRefId));
                 return refData
                     .map((r, i) => ({ ...normalizeKeys(r), originalIndex: i }))
-                    .filter(r => r.governorate === selGov)
+                    .filter(r => r.governorate.toString().trim() === selGov)
                     .map(r => ({ ...r, isDone: collectedIds.has(r.UniqueID) }));
             }, [selGov, refData, collected]);
 
@@ -423,7 +432,7 @@
 
             // --- Render ---
             return e(React.Fragment, null,
-                e(Header, { title: "نظام جمع إحداثيات العملاء - UTM 36N", count: `${collected.length} / ${refData.length}` }),
+                e(Header, { title: "نظام جمع إحداثيات العملاء - الجديد", count: `${collected.length} / ${refData.length}` }),
                 
                 showLogin && e('div', { className: "fixed inset-0 bg-black/50 flex items-center justify-center z-50" },
                     e('div', { className: "bg-white p-6 rounded-lg shadow-xl w-96" },
@@ -441,7 +450,7 @@
                 qrData && e('div', { className: "fixed inset-0 bg-black/60 flex items-center justify-center z-50", onClick: () => setQrData(null) },
                     e('div', { className: "bg-white p-8 rounded-xl shadow-2xl text-center printable-area", onClick: e => e.stopPropagation() },
                         e('h3', { className: "text-xl font-bold mb-2 text-slate-800" }, qrData.clientName),
-                        e('p', { className: "text-sm text-slate-500 mb-4" }, qrData.receivingPoint),
+                        e('p', { className: "text-sm text-slate-500 mb-4" }, `SAP: ${qrData.commercialCode} | Act: ${qrData.activity}`),
                         e('canvas', { id: "qr-canvas", className: "mx-auto border p-2 rounded" }),
                         e('div', { className: "mt-4 text-sm font-mono text-slate-600 text-left dir-ltr" },
                             e('div', null, `Lat: ${qrData.latitude}`),
@@ -483,21 +492,23 @@
                                     )
                                 ),
                                 e('div', null,
-                                    e('label', { className: "block text-sm font-medium mb-1" }, "2. العميل / نقطة الإستلام"),
+                                    e('label', { className: "block text-sm font-medium mb-1" }, "2. العميل"),
                                     e('select', { className: "w-full p-2 border rounded bg-slate-50", disabled: !selGov, value: selIndex, onChange: e => setSelIndex(e.target.value) },
-                                        e('option', { value: "" }, "-- اختر الموقع --"),
+                                        e('option', { value: "" }, "-- اختر العميل --"),
                                         filteredClients.map(c => 
                                             e('option', { key: c.originalIndex, value: c.originalIndex, className: c.isDone ? 'text-green-600' : '' }, 
-                                                `${c.isDone ? '✓ ' : ''}${c.clientName} - ${c.receivingPoint} (${c.commercialCode})`
+                                                `${c.isDone ? '✓ ' : ''}${c.clientName} - ${c.activity} (${c.commercialCode})`
                                             )
                                         )
                                     )
                                 ),
 
                                 selectedItem && e('div', { className: "bg-blue-50 p-3 rounded text-sm text-blue-800 space-y-1" },
-                                    e('p', null, e('span', { className: "font-bold" }, "الكود: "), selectedItem.commercialCode),
-                                    e('p', null, e('span', { className: "font-bold" }, "الخط الرئيسي: "), selectedItem.mainLine),
-                                    e('p', null, e('span', { className: "font-bold" }, "السعة: "), selectedItem.capacity)
+                                    e('p', null, e('span', { className: "font-bold" }, "SAP كود: "), selectedItem.commercialCode),
+                                    e('p', null, e('span', { className: "font-bold" }, "كود بتروتريد: "), selectedItem.petroCode),
+                                    e('p', null, e('span', { className: "font-bold" }, "النشاط: "), selectedItem.activity),
+                                    e('p', null, e('span', { className: "font-bold" }, "كميات الغاز: "), selectedItem.capacity),
+                                    e('p', null, e('span', { className: "font-bold" }, "بداية العقد: "), selectedItem.startDate)
                                 ),
 
                                 e('div', null,
@@ -540,7 +551,7 @@
                                 e('table', { className: "w-full text-right" },
                                     e('thead', null, e('tr', null,
                                         e('th', { className: "table-header-cell" }, "العميل"),
-                                        e('th', { className: "table-header-cell" }, "الكود"),
+                                        e('th', { className: "table-header-cell" }, "SAP كود"),
                                         e('th', { className: "table-header-cell" }, "UTM X"),
                                         e('th', { className: "table-header-cell" }, "UTM Y"),
                                         e('th', { className: "table-header-cell" }, "إجراءات")
@@ -565,15 +576,15 @@
                                     e('thead', null, e('tr', null,
                                         e('th', { className: "table-header-cell" }, "م"),
                                         e('th', { className: "table-header-cell" }, "العميل"),
-                                        e('th', { className: "table-header-cell" }, "نقطة الإستلام"),
+                                        e('th', { className: "table-header-cell" }, "النشاط"),
                                         e('th', { className: "table-header-cell" }, "المحافظة"),
-                                        e('th', { className: "table-header-cell" }, "الكود")
+                                        e('th', { className: "table-header-cell" }, "SAP كود")
                                     )),
                                     e('tbody', null,
                                         pendingList.slice(0, 100).map((row, i) => e('tr', { key: i, className: "hover:bg-slate-50" },
                                             e('td', { className: "table-body-cell text-slate-400" }, i + 1),
                                             e('td', { className: "table-body-cell font-medium" }, row.clientName),
-                                            e('td', { className: "table-body-cell text-sm" }, row.receivingPoint),
+                                            e('td', { className: "table-body-cell text-sm" }, row.activity),
                                             e('td', { className: "table-body-cell" }, row.governorate),
                                             e('td', { className: "table-body-cell" }, row.commercialCode)
                                         ))
