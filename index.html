@@ -3,17 +3,21 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GASCO Smart Collector (Final)</title>
+    <title>GASCO Smart Collector (Map Dashboard)</title>
+    
     <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
-
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
     <style>
         body { font-family: 'Cairo', sans-serif; background-color: #f8fafc; }
@@ -23,6 +27,8 @@
         .glass-panel { background: white; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        /* Map Styles */
+        #admin-map { height: 100%; width: 100%; border-radius: 12px; z-index: 1; }
     </style>
 <script type="importmap">
 {
@@ -124,12 +130,84 @@
             );
         };
 
+        // --- Admin Map Component ---
+        const AdminMap = ({ data, onClose }) => {
+            const mapRef = React.useRef(null);
+            
+            React.useEffect(() => {
+                if (!document.getElementById('admin-map')) return;
+                
+                // Initialize Map
+                const map = L.map('admin-map').setView([26.8206, 30.8025], 6); // Default View: Egypt
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; OpenStreetMap contributors'
+                }).addTo(map);
+
+                // Add Markers
+                const markers = L.featureGroup();
+                
+                data.forEach(item => {
+                    const lat = parseFloat(item.latitude);
+                    const lon = parseFloat(item.longitude);
+                    if(!isNaN(lat) && !isNaN(lon)) {
+                        const isActive = item.status === 'Active';
+                        // Custom colored icons
+                        const color = isActive ? 'green' : 'red';
+                        const markerHtml = `<div style="background-color: ${color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px black;"></div>`;
+                        
+                        const icon = L.divIcon({
+                            className: 'custom-div-icon',
+                            html: markerHtml,
+                            iconSize: [12, 12],
+                            iconAnchor: [6, 6]
+                        });
+
+                        const marker = L.marker([lat, lon], { icon: icon })
+                            .bindPopup(`
+                                <div class="text-right dir-rtl font-sans">
+                                    <h3 class="font-bold text-sm">${item.clientName}</h3>
+                                    <p class="text-xs text-gray-600">${item.governorate}</p>
+                                    <p class="text-xs mt-1">Status: <b style="color:${color}">${item.status || 'Active'}</b></p>
+                                </div>
+                            `);
+                        markers.addLayer(marker);
+                    }
+                });
+
+                markers.addTo(map);
+                if(data.length > 0) map.fitBounds(markers.getBounds(), { padding: [50, 50] });
+
+                return () => map.remove();
+            }, [data]);
+
+            return e('div', { className: "fixed inset-0 bg-black/80 z-50 flex flex-col p-6 fade-in" },
+                e('div', { className: "bg-white rounded-xl shadow-2xl flex-1 flex flex-col overflow-hidden relative" },
+                    e('div', { className: "p-4 border-b flex justify-between items-center bg-slate-50" },
+                        e('h2', { className: "font-bold text-lg" }, 
+                            e('i', { className: "fa-solid fa-map-location-dot mr-2 text-blue-600" }), "Admin Map Overview"
+                        ),
+                        e('button', { onClick: onClose, className: "w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 flex items-center justify-center transition-colors" }, 
+                            e('i', { className: "fa-solid fa-times" })
+                        )
+                    ),
+                    e('div', { className: "flex-1 relative" },
+                        e('div', { id: "admin-map" })
+                    ),
+                    e('div', { className: "p-3 bg-white border-t text-xs text-center text-slate-500 flex justify-center gap-6" },
+                         e('div', { className: "flex items-center gap-2" }, e('div', { className: "w-3 h-3 rounded-full bg-green-600" }), "Active (يعمل)"),
+                         e('div', { className: "flex items-center gap-2" }, e('div', { className: "w-3 h-3 rounded-full bg-red-600" }), "Inactive (متوقف)")
+                    )
+                )
+            );
+        };
+
         const MainApp = () => {
             const { useState, useEffect, useMemo } = React;
             
             const [isAdmin, setIsAdmin] = useState(false);
             const [passInput, setPassInput] = useState('');
             const [showLogin, setShowLogin] = useState(false);
+            const [showMap, setShowMap] = useState(false); // Map Toggle
             
             const [refData, setRefData] = useState([]); 
             const [collected, setCollected] = useState([]);
@@ -141,8 +219,6 @@
             const [gMapLink, setGMapLink] = useState('');
             const [coords, setCoords] = useState(null);
             const [utm, setUtm] = useState(null);
-            
-            // NEW: Status State
             const [status, setStatus] = useState('Active'); 
 
             const [alert, setAlert] = useState(null);
@@ -170,7 +246,6 @@
                     setTimeout(() => {
                         const canvas = document.getElementById('qr-canvas');
                         if (canvas && window.QRCode) {
-                            // Added Status to QR
                             const qrContent = `Client:${qrData.commercialCode}\nStatus:${qrData.status}\nLat:${qrData.latitude}\nLon:${qrData.longitude}`;
                             window.QRCode.toCanvas(canvas, qrContent, { width: 200 }, (err) => { if (err) console.error(err); });
                         }
@@ -261,11 +336,7 @@
                         const processed = json.map((row, idx) => {
                             const newRow = {};
                             Object.keys(row).forEach(key => {
-                                const safeKey = key
-                                    .replace(/[.#$/\[\]]/g, '_')
-                                    .replace(/[\x00-\x1F\x7F]+/g, ' ')
-                                    .replace(/\s+/g, ' ')
-                                    .trim();
+                                const safeKey = key.replace(/[.#$/\[\]]/g, '_').replace(/[\x00-\x1F\x7F]+/g, ' ').replace(/\s+/g, ' ').trim();
                                 newRow[safeKey] = row[key];
                             });
                             newRow.UniqueID = idx;
@@ -295,7 +366,7 @@
                     crn: norm.crn,
                     activity: norm.activity,
                     governorate: norm.governorate,
-                    status: status, // Save Status
+                    status: status,
                     latitude: coords.lat.toFixed(6),
                     longitude: coords.lon.toFixed(6),
                     utmX: utm ? utm.x.toFixed(2) : '',
@@ -311,7 +382,7 @@
 
             const resetForm = () => { 
                 setSelIndex(''); setGMapLink(''); setCoords(null); setUtm(null); setEditId(null); setSearchTerm(''); 
-                setStatus('Active'); // Reset to default
+                setStatus('Active'); 
             };
             
             const handleEdit = (rec) => {
@@ -319,7 +390,7 @@
                 const idx = refData.findIndex(r => r.UniqueID === rec.masterRefId);
                 setSelIndex(idx.toString());
                 setSelGov(normalizeKeys(refData[idx]).governorate);
-                setStatus(rec.status || 'Active'); // Load existing status
+                setStatus(rec.status || 'Active'); 
                 handleLinkChange(`${rec.latitude}, ${rec.longitude}`);
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             };
@@ -332,7 +403,7 @@
                     const c = map[row.UniqueID];
                     return { 
                         ...row, 
-                        'Status': c?.status || 'Pending', // Export Status
+                        'Status': c?.status || 'Pending', 
                         'Lat': c?.latitude||'', 
                         'Lon': c?.longitude||'', 
                         'UTM_X': c?.utmX||'', 
@@ -353,10 +424,16 @@
                             e('div', { className: "w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold" }, "G"),
                             e('h1', { className: "text-lg font-bold tracking-wide" }, "GASCO Smart Collector")
                         ),
-                        e('button', { 
-                            onClick: () => isAdmin ? setIsAdmin(false) : setShowLogin(true),
-                            className: "text-xs font-semibold bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-full transition-colors"
-                        }, isAdmin ? "Admin Mode" : "Login")
+                        e('div', { className: "flex gap-2" },
+                            isAdmin && e('button', { 
+                                onClick: () => setShowMap(true),
+                                className: "text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 rounded-full transition-colors flex items-center gap-2"
+                            }, e('i', { className: "fa-solid fa-map" }), "Admin Map"),
+                            e('button', { 
+                                onClick: () => isAdmin ? setIsAdmin(false) : setShowLogin(true),
+                                className: "text-xs font-semibold bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-full transition-colors"
+                            }, isAdmin ? "Logout" : "Login")
+                        )
                     )
                 ),
 
@@ -379,8 +456,6 @@
                                     ),
                                     selGov && e('span', { className: "text-xs font-mono bg-slate-100 px-2 py-1 rounded" }, `${govStats.done}/${govStats.total}`)
                                 ),
-                                
-                                // 1. SHEET NAME Select
                                 e('div', { className: "mb-4" },
                                     e('label', { className: "text-xs font-bold text-slate-500 uppercase mb-1 block" }, "1. اسم الشيت (المنطقة)"),
                                     e('select', { 
@@ -393,8 +468,6 @@
                                     ),
                                     selGov && e(ProgressBar, { total: govStats.total, current: govStats.done })
                                 ),
-
-                                // 2. Client Search
                                 e('div', { className: `mb-4 transition-opacity ${!selGov ? 'opacity-50 pointer-events-none' : 'opacity-100'}` },
                                     e('label', { className: "text-xs font-bold text-slate-500 uppercase mb-1 block" }, "2. العميل"),
                                     e('div', { className: "relative mb-2" },
@@ -425,7 +498,6 @@
                                             )
                                     )
                                 ),
-
                                 selectedItem && e('div', { className: "bg-gradient-to-br from-slate-50 to-blue-50 border border-blue-100 p-4 rounded-xl mb-4 fade-in" },
                                     e('div', { className: "grid grid-cols-2 gap-y-2 text-sm" },
                                         e('div', null, e('span', { className: "text-slate-500 text-xs block" }, "SAP Code"), e('span', { className: "font-mono font-bold text-slate-700" }, selectedItem.commercialCode)),
@@ -433,8 +505,6 @@
                                         e('div', { className: "col-span-2" }, e('span', { className: "text-slate-500 text-xs block" }, "النشاط"), e('span', { className: "font-medium" }, selectedItem.activity))
                                     )
                                 ),
-
-                                // 3. Location Input
                                 e('div', { className: "mb-4" },
                                     e('label', { className: "text-xs font-bold text-slate-500 uppercase mb-1 block" }, "3. الموقع"),
                                     e('div', { className: "flex gap-2" },
@@ -465,8 +535,6 @@
                                         }, "Check Map ↗")
                                     )
                                 ),
-
-                                // 4. Status Dropdown (NEW)
                                 e('div', { className: "mb-6" },
                                     e('label', { className: "text-xs font-bold text-slate-500 uppercase mb-1 block" }, "4. حالة العميل"),
                                     e('div', { className: "relative" },
@@ -482,7 +550,6 @@
                                         e('i', { className: "fa-solid fa-chevron-down absolute right-3 top-3 text-slate-400 pointer-events-none" })
                                     )
                                 ),
-
                                 e('button', {
                                     onClick: handleSubmit,
                                     disabled: !coords || !selIndex,
@@ -501,7 +568,6 @@
                             )
                         ),
 
-                        // RIGHT COLUMN: Data Table
                         e('div', { className: "lg:col-span-8" },
                             e('div', { className: "glass-panel rounded-xl overflow-hidden flex flex-col h-[650px]" },
                                 e('div', { className: "p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50" },
@@ -572,6 +638,8 @@
                         )
                     )
                 ),
+
+                showMap && e(AdminMap, { data: collected, onClose: () => setShowMap(false) }),
 
                 qrData && e('div', { className: "fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4", onClick: () => setQrData(null) },
                     e('div', { className: "bg-white p-6 rounded-3xl shadow-2xl max-w-sm w-full text-center printable-area", onClick: e => e.stopPropagation() },
