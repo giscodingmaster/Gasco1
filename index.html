@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Smart GASCO Collector</title>
+    <title>Smart GASCO Collector (Sheet Based)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
@@ -110,10 +110,16 @@
             return null;
         }
 
+        // --- MAPPING UPDATED FOR SHEET NAME ---
         const COLS = {
-            CLIENT: 'اسم_المنشأة', SAP_CODE: 'كود_ساب_إيجاس', PETRO_CODE: 'كود_بتروتريد',
-            CRN: 'CRN', GOV: 'gove_name', ACTIVITY: 'نوع_النشاط',
-            CAPACITY: 'كميات_الغاز_الصادر__بها_موافقة', START_DATE: 'تاريخ_بداية_العقد'
+            CLIENT: 'اسم_المنشأة', 
+            SAP_CODE: 'كود_ساب_إيجاس', 
+            PETRO_CODE: 'كود_بتروتريد',
+            CRN: 'CRN', 
+            GOV: 'اسم الشيت',  // CHANGED FROM 'gove_name' TO 'اسم الشيت'
+            ACTIVITY: 'نوع_النشاط',
+            CAPACITY: 'كميات_الغاز_الصادر__بها_موافقة', 
+            START_DATE: 'تاريخ_بداية_العقد'
         };
 
         const excelDateToJSDate = (serial) => {
@@ -204,7 +210,7 @@
                 commercialCode: row[COLS.SAP_CODE] || row[COLS.PETRO_CODE] || '_',
                 petroCode: row[COLS.PETRO_CODE] || '',
                 crn: row[COLS.CRN] || '', 
-                governorate: row[COLS.GOV] || 'Unknown',
+                governorate: row[COLS.GOV] || 'Unknown', // This will now be Sheet Name
                 activity: row[COLS.ACTIVITY] || '',
                 capacity: row[COLS.CAPACITY] || '',
                 startDate: excelDateToJSDate(row[COLS.START_DATE]),
@@ -271,7 +277,6 @@
             };
 
             const handleFileUpload = (e) => {
-                // ... (Keep existing upload logic)
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
@@ -306,7 +311,7 @@
                     petroCode: norm.petroCode,
                     crn: norm.crn,
                     activity: norm.activity,
-                    governorate: norm.governorate,
+                    governorate: norm.governorate, // Now stores Sheet Name
                     latitude: coords.lat.toFixed(6),
                     longitude: coords.lon.toFixed(6),
                     utmX: utm ? utm.x.toFixed(2) : '',
@@ -385,15 +390,15 @@
                                     selGov && e('span', { className: "text-xs font-mono bg-slate-100 px-2 py-1 rounded" }, `${govStats.done}/${govStats.total}`)
                                 ),
                                 
-                                // 1. Governorate Select
+                                // 1. SHEET NAME Select
                                 e('div', { className: "mb-4" },
-                                    e('label', { className: "text-xs font-bold text-slate-500 uppercase mb-1 block" }, "1. المحافظة"),
+                                    e('label', { className: "text-xs font-bold text-slate-500 uppercase mb-1 block" }, "1. اسم الشيت (المنطقة)"),
                                     e('select', { 
                                         className: "w-full p-2.5 rounded-lg border border-slate-300 bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none transition-all",
                                         value: selGov,
                                         onChange: e => { setSelGov(e.target.value); setSelIndex(''); setSearchTerm(''); }
                                     },
-                                        e('option', { value: "" }, "اختر المحافظة..."),
+                                        e('option', { value: "" }, "اختر الشيت..."),
                                         govs.map(g => e('option', { key: g, value: g }, g))
                                     ),
                                     selGov && e(ProgressBar, { total: govStats.total, current: govStats.done })
@@ -524,7 +529,7 @@
                                                 e('th', { className: "p-3 text-xs font-bold text-slate-500" }, "#"),
                                                 e('th', { className: "p-3 text-xs font-bold text-slate-500" }, "العميل"),
                                                 e('th', { className: "p-3 text-xs font-bold text-slate-500" }, "CRN / SAP"),
-                                                e('th', { className: "p-3 text-xs font-bold text-slate-500" }, "المحافظة"),
+                                                e('th', { className: "p-3 text-xs font-bold text-slate-500" }, "المنطقة / الشيت"), // Renamed header
                                                 activeTab === 'collected' && e('th', { className: "p-3 text-xs font-bold text-slate-500" }, "إجراءات")
                                             )
                                         ),
