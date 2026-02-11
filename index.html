@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>G (Map Dashboard)</title>
+    <title>GASCO Smart Collector (Secure)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -132,8 +132,6 @@
 
         // --- Admin Map Component ---
         const AdminMap = ({ data, onClose }) => {
-            const mapRef = React.useRef(null);
-            
             React.useEffect(() => {
                 if (!document.getElementById('admin-map')) return;
                 
@@ -414,7 +412,7 @@
                 const ws = XLSX.utils.json_to_sheet(output);
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, "Data");
-                XLSX.writeFile(wb, "industrials_Final_Export.xlsx");
+                XLSX.writeFile(wb, "Gasco_Final_Export.xlsx");
             };
 
             return e(React.Fragment, null,
@@ -422,7 +420,7 @@
                     e('div', { className: "container mx-auto px-4 py-3 flex justify-between items-center" },
                         e('div', { className: "flex items-center gap-3" },
                             e('div', { className: "w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold" }, "G"),
-                            e('h1', { className: "text-lg font-bold tracking-wide" }, "G Hand")
+                            e('h1', { className: "text-lg font-bold tracking-wide" }, "GASCO Smart Collector")
                         ),
                         e('div', { className: "flex gap-2" },
                             isAdmin && e('button', { 
@@ -580,7 +578,7 @@
                                             }, tab === 'pending' ? "المتبقي" : "تم الجمع")
                                         )
                                     ),
-                                    e('button', { onClick: exportExcel, className: "text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors" }, 
+                                    isAdmin && e('button', { onClick: exportExcel, className: "text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors" }, 
                                         e('i', { className: "fa-solid fa-file-excel mr-2" }), "تصدير"
                                     )
                                 ),
