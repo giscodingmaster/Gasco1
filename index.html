@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>G Hand (With Labels)</title>
+    <title>G Hand (GeoJSON Export)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -15,6 +15,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://unpkg.com/shpjs@latest/dist/shp.js"></script>
     
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
@@ -28,27 +29,13 @@
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         #admin-map { height: 100%; width: 100%; border-radius: 12px; z-index: 1; }
-        
-        /* Map Controls */
         .leaflet-control-layers { text-align: left; font-family: sans-serif; }
-        
-        /* Custom Label Style */
         .map-text-label {
-            background: rgba(255, 255, 255, 0.85);
-            border: 1px solid #aaa;
-            border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-            padding: 0 4px;
-            font-size: 11px;
-            font-weight: bold;
-            color: #333;
-            white-space: nowrap;
-            text-align: center;
+            background: rgba(255, 255, 255, 0.85); border: 1px solid #aaa; border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2); padding: 0 4px; font-size: 11px;
+            font-weight: bold; color: #333; white-space: nowrap; text-align: center;
         }
-        /* Remove default leaflet tooltip arrow for cleaner look */
-        .leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before, .leaflet-tooltip-right:before {
-            display: none !important;
-        }
+        .leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before, .leaflet-tooltip-right:before { display: none !important; }
     </style>
 <script type="importmap">
 {
@@ -148,27 +135,23 @@
             );
         };
 
-        // =========================================================
-        // UPDATED ADMIN MAP: With Toggle Labels
-        // =========================================================
+        // --- Admin Map ---
         const AdminMap = ({ data, onClose }) => {
-            const [showLabels, setShowLabels] = React.useState(false); // State for Labels
+            const [showLabels, setShowLabels] = React.useState(false);
+            const mapRef = React.useRef(null);
+            const fileInputRef = React.useRef(null);
 
             React.useEffect(() => {
                 if (!document.getElementById('admin-map')) return;
                 
-                // Layers
-                const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' });
+                const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' });
                 const googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',{ maxZoom: 20, subdomains:['mt0','mt1','mt2','mt3'] });
                 const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri' });
 
-                const map = L.map('admin-map', {
-                    center: [26.8206, 30.8025],
-                    zoom: 6,
-                    layers: [esriSat]
-                });
+                const map = L.map('admin-map', { center: [26.8206, 30.8025], zoom: 6, layers: [esriSat] });
+                mapRef.current = map;
 
-                const baseMaps = { "Esri World Imagery": esriSat, "Google Satellite": googleSat, "Street Map": osmLayer };
+                const baseMaps = { "Esri Satellite": esriSat, "Google Hybrid": googleSat, "Street Map": osmLayer };
                 L.control.layers(baseMaps).addTo(map);
 
                 const markers = L.featureGroup();
@@ -178,8 +161,6 @@
                     if(!isNaN(lat) && !isNaN(lon)) {
                         const isActive = item.status === 'Active';
                         const color = isActive ? '#16a34a' : '#dc2626';
-                        
-                        // Marker Icon
                         const markerHtml = `<div style="background-color: ${color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px black;"></div>`;
                         const icon = L.divIcon({ className: 'custom-div-icon', html: markerHtml, iconSize: [14, 14], iconAnchor: [7, 7] });
                         
@@ -191,47 +172,66 @@
                                     <p class="text-sm mt-2">Status: <span class="px-2 py-0.5 rounded text-white text-xs" style="background-color:${color}">${item.status || 'Active'}</span></p>
                                 </div>
                             `);
-                        
-                        // Smart Label Logic
-                        if (showLabels) {
-                            marker.bindTooltip(item.clientName, {
-                                permanent: true,
-                                direction: 'top',
-                                offset: [0, -10],
-                                className: 'map-text-label'
-                            });
-                        }
-
+                        if (showLabels) marker.bindTooltip(item.clientName, { permanent: true, direction: 'top', offset: [0, -10], className: 'map-text-label' });
                         markers.addLayer(marker);
                     }
                 });
                 markers.addTo(map);
-                
                 if(data.length > 0) map.fitBounds(markers.getBounds(), { padding: [50, 50] });
                 
                 return () => map.remove();
-            }, [data, showLabels]); // Re-render map when toggle changes
+            }, [data, showLabels]);
+
+            const handleLayerUpload = async (e) => {
+                const file = e.target.files[0];
+                if (!file || !mapRef.current) return;
+                const map = mapRef.current;
+                try {
+                    let geojson = null;
+                    alert("Loading layer...");
+                    if (file.name.endsWith('.zip')) {
+                        const buffer = await file.arrayBuffer();
+                        geojson = await window.shp(buffer);
+                    } else if (file.name.endsWith('.json') || file.name.endsWith('.geojson')) {
+                        const text = await file.text();
+                        geojson = JSON.parse(text);
+                    } else {
+                        alert("Unsupported format. Use .zip or .geojson");
+                        return;
+                    }
+                    if (geojson) {
+                        const layer = L.geoJSON(geojson, {
+                            style: { color: '#facc15', weight: 2, opacity: 0.8, fillOpacity: 0.2, fillColor: '#facc15' },
+                            onEachFeature: (feature, layer) => {
+                                const props = feature.properties || {};
+                                const keys = Object.keys(props);
+                                const crnKey = keys.find(k => k.toUpperCase() === 'CRN');
+                                const crnValue = crnKey ? props[crnKey] : "Not Found";
+                                layer.bindPopup(`<div class="text-left font-sans text-sm"><div class="font-bold border-b pb-1 mb-1">Feature</div><div class="text-blue-700"><b>CRN:</b> ${crnValue}</div></div>`);
+                            }
+                        }).addTo(map);
+                        map.fitBounds(layer.getBounds());
+                    }
+                } catch (err) { alert("Error: " + err.message); }
+                e.target.value = null; 
+            };
 
             return e('div', { className: "fixed inset-0 bg-black/90 z-50 flex flex-col p-4 fade-in" },
                 e('div', { className: "bg-white rounded-xl shadow-2xl flex-1 flex flex-col overflow-hidden relative" },
                     e('div', { className: "p-4 border-b flex justify-between items-center bg-slate-50" },
-                        e('div', { className: "flex items-center gap-4" },
+                        e('div', { className: "flex items-center gap-3" },
                             e('h2', { className: "font-bold text-lg" }, e('i', { className: "fa-solid fa-map-location-dot mr-2 text-blue-600" }), "Admin Map"),
-                            // Toggle Button
-                            e('button', { 
-                                onClick: () => setShowLabels(!showLabels),
-                                className: `text-xs px-3 py-1.5 rounded-full font-bold transition-colors flex items-center gap-2 border ${showLabels ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300'}`
-                            }, 
-                                e('i', { className: `fa-solid ${showLabels ? 'fa-eye' : 'fa-eye-slash'}` }), 
-                                showLabels ? "Hide Names" : "Show Names"
-                            )
+                            e('button', { onClick: () => setShowLabels(!showLabels), className: `text-xs px-3 py-1.5 rounded-full font-bold transition-colors border ${showLabels ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300'}` }, e('i', { className: `fa-solid ${showLabels ? 'fa-eye' : 'fa-eye-slash'} mr-1` }), showLabels ? "Hide Names" : "Show Names"),
+                            e('button', { onClick: () => fileInputRef.current.click(), className: "text-xs px-3 py-1.5 rounded-full font-bold bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200 transition-colors" }, e('i', { className: "fa-solid fa-folder-open mr-1" }), "Load Layer (GIS)"),
+                            e('input', { type: "file", accept: ".zip,.json,.geojson", ref: fileInputRef, className: "hidden", onChange: handleLayerUpload })
                         ),
                         e('button', { onClick: onClose, className: "w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 flex items-center justify-center transition-colors" }, e('i', { className: "fa-solid fa-times" }))
                     ),
                     e('div', { className: "flex-1 relative" }, e('div', { id: "admin-map" })),
                     e('div', { className: "p-3 bg-white border-t text-xs text-center text-slate-500 flex justify-center gap-6" },
                          e('div', { className: "flex items-center gap-2" }, e('div', { className: "w-3 h-3 rounded-full bg-green-600" }), "Active (يعمل)"),
-                         e('div', { className: "flex items-center gap-2" }, e('div', { className: "w-3 h-3 rounded-full bg-red-600" }), "Inactive (متوقف)")
+                         e('div', { className: "flex items-center gap-2" }, e('div', { className: "w-3 h-3 rounded-full bg-red-600" }), "Inactive (متوقف)"),
+                         e('div', { className: "flex items-center gap-2" }, e('div', { className: "w-3 h-3 border-2 border-amber-400 bg-amber-400/20" }), "Uploaded Polygon")
                     )
                 )
             );
@@ -454,6 +454,42 @@
                 XLSX.writeFile(wb, "Gasco_Final_Export.xlsx");
             };
 
+            // NEW: GeoJSON Export Function
+            const exportGeoJSON = () => {
+                if (collected.length === 0) {
+                    showAlert("لا توجد بيانات لتصديرها", "error");
+                    return;
+                }
+                const features = collected.map(c => {
+                    const lat = parseFloat(c.latitude);
+                    const lon = parseFloat(c.longitude);
+                    if (isNaN(lat) || isNaN(lon)) return null;
+                    return {
+                        type: "Feature",
+                        geometry: { type: "Point", coordinates: [lon, lat] },
+                        properties: {
+                            client: c.clientName,
+                            sap: c.commercialCode,
+                            crn: c.crn,
+                            sheet: c.governorate,
+                            status: c.status,
+                            activity: c.activity,
+                            utm_x: c.utmX,
+                            utm_y: c.utmY,
+                            date: c.timestamp
+                        }
+                    };
+                }).filter(f => f !== null);
+
+                const geoJSON = { type: "FeatureCollection", features };
+                const blob = new Blob([JSON.stringify(geoJSON)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = "G_Hand_Locations.geojson";
+                a.click();
+            };
+
             return e(React.Fragment, null,
                 e('nav', { className: "bg-slate-900 text-white sticky top-0 z-40 shadow-lg" },
                     e('div', { className: "container mx-auto px-4 py-3 flex justify-between items-center" },
@@ -621,8 +657,13 @@
                                             }, tab === 'pending' ? "المتبقي" : "تم الجمع")
                                         )
                                     ),
-                                    isAdmin && e('button', { onClick: exportExcel, className: "text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors" }, 
-                                        e('i', { className: "fa-solid fa-file-excel mr-2" }), "تصدير"
+                                    isAdmin && e('div', { className: "flex gap-2" },
+                                        e('button', { onClick: exportGeoJSON, className: "text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors" }, 
+                                            e('i', { className: "fa-solid fa-globe mr-2" }), "GeoJSON"
+                                        ),
+                                        e('button', { onClick: exportExcel, className: "text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors" }, 
+                                            e('i', { className: "fa-solid fa-file-excel mr-2" }), "Excel"
+                                        )
                                     )
                                 ),
                                 e('div', { className: "flex-1 overflow-auto" },
