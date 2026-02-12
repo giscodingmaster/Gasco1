@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>G Hand (Final Corrected)</title>
+    <title>GASCO Smart Collector (Satellite Map)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -28,6 +28,9 @@
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         #admin-map { height: 100%; width: 100%; border-radius: 12px; z-index: 1; }
+        
+        /* Fix Leaflet Controls for RTL */
+        .leaflet-control-layers { text-align: left; font-family: sans-serif; }
     </style>
 <script type="importmap">
 {
@@ -97,9 +100,6 @@
             return date_info.toLocaleDateString('ar-EG');
         };
 
-        // =========================================================
-        // 1. UPDATED COLUMN MAPPING (Corrected Field Name)
-        // =========================================================
         const COLS = {
             CLIENT: 'اسم المنشأة', 
             SAP_CODE: 'كود ساب إيجاس', 
@@ -109,7 +109,7 @@
             ACTIVITY: 'نوع النشاط',
             CAPACITY: 'كميات الغاز الصادر بها موافقة', 
             START_DATE: 'تاريخ بداية العقد',
-            CLIENT_STATUS: 'حالة العميل (ملاحظات)' // Corrected Here
+            CLIENT_STATUS: 'حالة العميل (ملاحظات)' 
         };
 
         const StatsCard = ({ title, value, icon, color }) => 
@@ -130,30 +130,74 @@
             );
         };
 
+        // =========================================================
+        // UPDATED ADMIN MAP: With Satellite Support
+        // =========================================================
         const AdminMap = ({ data, onClose }) => {
             React.useEffect(() => {
                 if (!document.getElementById('admin-map')) return;
-                const map = L.map('admin-map').setView([26.8206, 30.8025], 6); 
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+                
+                // 1. Define Base Layers
+                const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; OpenStreetMap'
+                });
+
+                const googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',{
+                    maxZoom: 20,
+                    subdomains:['mt0','mt1','mt2','mt3']
+                });
+
+                const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri'
+                });
+
+                // 2. Initialize Map with Default Layer
+                const map = L.map('admin-map', {
+                    center: [26.8206, 30.8025],
+                    zoom: 6,
+                    layers: [osmLayer] // Default to Street Map
+                });
+
+                // 3. Add Layer Control
+                const baseMaps = {
+                    "Street Map (OSM)": osmLayer,
+                    "Google Satellite (Hybrid)": googleSat,
+                    "Esri World Imagery": esriSat
+                };
+                L.control.layers(baseMaps).addTo(map);
+
+                // 4. Add Markers
                 const markers = L.featureGroup();
                 data.forEach(item => {
                     const lat = parseFloat(item.latitude);
                     const lon = parseFloat(item.longitude);
                     if(!isNaN(lat) && !isNaN(lon)) {
                         const isActive = item.status === 'Active';
-                        const color = isActive ? 'green' : 'red';
-                        const markerHtml = `<div style="background-color: ${color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px black;"></div>`;
-                        const icon = L.divIcon({ className: 'custom-div-icon', html: markerHtml, iconSize: [12, 12], iconAnchor: [6, 6] });
+                        const color = isActive ? '#16a34a' : '#dc2626'; // Green / Red
+                        const markerHtml = `<div style="background-color: ${color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px black;"></div>`;
+                        const icon = L.divIcon({ className: 'custom-div-icon', html: markerHtml, iconSize: [14, 14], iconAnchor: [7, 7] });
+                        
                         const marker = L.marker([lat, lon], { icon: icon })
-                            .bindPopup(`<div class="text-right dir-rtl font-sans"><h3 class="font-bold text-sm">${item.clientName}</h3><p class="text-xs text-gray-600">${item.governorate}</p><p class="text-xs mt-1">Status: <b style="color:${color}">${item.status || 'Active'}</b></p></div>`);
+                            .bindPopup(`
+                                <div class="text-right dir-rtl font-sans min-w-[200px]">
+                                    <h3 class="font-bold text-base border-b pb-1 mb-1">${item.clientName}</h3>
+                                    <p class="text-sm text-gray-700"><b>Sheet:</b> ${item.governorate}</p>
+                                    <p class="text-sm text-gray-700"><b>SAP:</b> ${item.commercialCode}</p>
+                                    <p class="text-sm mt-2">Status: <span class="px-2 py-0.5 rounded text-white text-xs" style="background-color:${color}">${item.status || 'Active'}</span></p>
+                                    <a href="http://googleusercontent.com/maps.google.com/?q=${lat},${lon}" target="_blank" class="block mt-2 text-blue-600 hover:underline text-xs">View on Google Maps</a>
+                                </div>
+                            `);
                         markers.addLayer(marker);
                     }
                 });
                 markers.addTo(map);
+                
                 if(data.length > 0) map.fitBounds(markers.getBounds(), { padding: [50, 50] });
+                
                 return () => map.remove();
             }, [data]);
-            return e('div', { className: "fixed inset-0 bg-black/80 z-50 flex flex-col p-6 fade-in" },
+
+            return e('div', { className: "fixed inset-0 bg-black/90 z-50 flex flex-col p-4 fade-in" },
                 e('div', { className: "bg-white rounded-xl shadow-2xl flex-1 flex flex-col overflow-hidden relative" },
                     e('div', { className: "p-4 border-b flex justify-between items-center bg-slate-50" },
                         e('h2', { className: "font-bold text-lg" }, e('i', { className: "fa-solid fa-map-location-dot mr-2 text-blue-600" }), "Admin Map Overview"),
@@ -220,9 +264,6 @@
                 }
             }, [qrData]);
 
-            // =========================================================
-            // 2. UPDATED NORMALIZATION (Safe Access)
-            // =========================================================
             const normalizeKeys = (row) => ({
                 id: row['UniqueID'],
                 clientName: row[COLS.CLIENT] || 'Unknown',
@@ -385,7 +426,7 @@
                 const ws = XLSX.utils.json_to_sheet(output);
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, "Data");
-                XLSX.writeFile(wb, "G_Hand_Final_Export.xlsx");
+                XLSX.writeFile(wb, "Gasco_Final_Export.xlsx");
             };
 
             return e(React.Fragment, null,
@@ -393,7 +434,7 @@
                     e('div', { className: "container mx-auto px-4 py-3 flex justify-between items-center" },
                         e('div', { className: "flex items-center gap-3" },
                             e('div', { className: "w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold" }, "G"),
-                            e('h1', { className: "text-lg font-bold tracking-wide" }, "G Hand")
+                            e('h1', { className: "text-lg font-bold tracking-wide" }, "GASCO Smart Collector")
                         ),
                         e('div', { className: "flex gap-2" },
                             isAdmin && e('button', { 
@@ -474,10 +515,6 @@
                                         e('div', null, e('span', { className: "text-slate-500 text-xs block" }, "SAP Code"), e('span', { className: "font-mono font-bold text-slate-700" }, selectedItem.commercialCode)),
                                         e('div', null, e('span', { className: "text-slate-500 text-xs block" }, "CRN"), e('span', { className: "font-mono font-bold text-indigo-600" }, selectedItem.crn)),
                                         e('div', null, e('span', { className: "text-slate-500 text-xs block" }, "النشاط"), e('span', { className: "font-medium" }, selectedItem.activity)),
-                                        
-                                        // =========================================================
-                                        // 3. UI RENDER (Added field display)
-                                        // =========================================================
                                         e('div', { className: "col-span-2 border-t border-blue-100 pt-2 mt-1" }, 
                                             e('span', { className: "text-slate-500 text-xs block" }, "حالة العميل (Excel)"), 
                                             e('span', { className: "font-bold text-amber-700" }, selectedItem.clientStatus)
