@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GASCO Smart Collector (Satellite Map)</title>
+    <title>G Hand</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -131,7 +131,7 @@
         };
 
         // =========================================================
-        // UPDATED ADMIN MAP: With Satellite Support
+        // UPDATED ADMIN MAP: Default to Esri Satellite
         // =========================================================
         const AdminMap = ({ data, onClose }) => {
             React.useEffect(() => {
@@ -151,18 +151,18 @@
                     attribution: 'Tiles &copy; Esri'
                 });
 
-                // 2. Initialize Map with Default Layer
+                // 2. Initialize Map with ESRI Default
                 const map = L.map('admin-map', {
                     center: [26.8206, 30.8025],
                     zoom: 6,
-                    layers: [osmLayer] // Default to Street Map
+                    layers: [esriSat] // Defaulting to Esri Satellite
                 });
 
                 // 3. Add Layer Control
                 const baseMaps = {
-                    "Street Map (OSM)": osmLayer,
+                    "Esri World Imagery": esriSat,
                     "Google Satellite (Hybrid)": googleSat,
-                    "Esri World Imagery": esriSat
+                    "Street Map (OSM)": osmLayer
                 };
                 L.control.layers(baseMaps).addTo(map);
 
@@ -434,7 +434,7 @@
                     e('div', { className: "container mx-auto px-4 py-3 flex justify-between items-center" },
                         e('div', { className: "flex items-center gap-3" },
                             e('div', { className: "w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold" }, "G"),
-                            e('h1', { className: "text-lg font-bold tracking-wide" }, "GASCO Smart Collector")
+                            e('h1', { className: "text-lg font-bold tracking-wide" }, "G Hand")
                         ),
                         e('div', { className: "flex gap-2" },
                             isAdmin && e('button', { 
