@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>G Hand</title>
+    <title>G Hand (With Labels)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -29,8 +29,26 @@
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         #admin-map { height: 100%; width: 100%; border-radius: 12px; z-index: 1; }
         
-        /* Fix Leaflet Controls for RTL */
+        /* Map Controls */
         .leaflet-control-layers { text-align: left; font-family: sans-serif; }
+        
+        /* Custom Label Style */
+        .map-text-label {
+            background: rgba(255, 255, 255, 0.85);
+            border: 1px solid #aaa;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+            padding: 0 4px;
+            font-size: 11px;
+            font-weight: bold;
+            color: #333;
+            white-space: nowrap;
+            text-align: center;
+        }
+        /* Remove default leaflet tooltip arrow for cleaner look */
+        .leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before, .leaflet-tooltip-right:before {
+            display: none !important;
+        }
     </style>
 <script type="importmap">
 {
@@ -131,49 +149,37 @@
         };
 
         // =========================================================
-        // UPDATED ADMIN MAP: Default to Esri Satellite
+        // UPDATED ADMIN MAP: With Toggle Labels
         // =========================================================
         const AdminMap = ({ data, onClose }) => {
+            const [showLabels, setShowLabels] = React.useState(false); // State for Labels
+
             React.useEffect(() => {
                 if (!document.getElementById('admin-map')) return;
                 
-                // 1. Define Base Layers
-                const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '&copy; OpenStreetMap'
-                });
+                // Layers
+                const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' });
+                const googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',{ maxZoom: 20, subdomains:['mt0','mt1','mt2','mt3'] });
+                const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri' });
 
-                const googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',{
-                    maxZoom: 20,
-                    subdomains:['mt0','mt1','mt2','mt3']
-                });
-
-                const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                    attribution: 'Tiles &copy; Esri'
-                });
-
-                // 2. Initialize Map with ESRI Default
                 const map = L.map('admin-map', {
                     center: [26.8206, 30.8025],
                     zoom: 6,
-                    layers: [esriSat] // Defaulting to Esri Satellite
+                    layers: [esriSat]
                 });
 
-                // 3. Add Layer Control
-                const baseMaps = {
-                    "Esri World Imagery": esriSat,
-                    "Google Satellite (Hybrid)": googleSat,
-                    "Street Map (OSM)": osmLayer
-                };
+                const baseMaps = { "Esri World Imagery": esriSat, "Google Satellite": googleSat, "Street Map": osmLayer };
                 L.control.layers(baseMaps).addTo(map);
 
-                // 4. Add Markers
                 const markers = L.featureGroup();
                 data.forEach(item => {
                     const lat = parseFloat(item.latitude);
                     const lon = parseFloat(item.longitude);
                     if(!isNaN(lat) && !isNaN(lon)) {
                         const isActive = item.status === 'Active';
-                        const color = isActive ? '#16a34a' : '#dc2626'; // Green / Red
+                        const color = isActive ? '#16a34a' : '#dc2626';
+                        
+                        // Marker Icon
                         const markerHtml = `<div style="background-color: ${color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px black;"></div>`;
                         const icon = L.divIcon({ className: 'custom-div-icon', html: markerHtml, iconSize: [14, 14], iconAnchor: [7, 7] });
                         
@@ -182,11 +188,20 @@
                                 <div class="text-right dir-rtl font-sans min-w-[200px]">
                                     <h3 class="font-bold text-base border-b pb-1 mb-1">${item.clientName}</h3>
                                     <p class="text-sm text-gray-700"><b>Sheet:</b> ${item.governorate}</p>
-                                    <p class="text-sm text-gray-700"><b>SAP:</b> ${item.commercialCode}</p>
                                     <p class="text-sm mt-2">Status: <span class="px-2 py-0.5 rounded text-white text-xs" style="background-color:${color}">${item.status || 'Active'}</span></p>
-                                    <a href="http://googleusercontent.com/maps.google.com/?q=${lat},${lon}" target="_blank" class="block mt-2 text-blue-600 hover:underline text-xs">View on Google Maps</a>
                                 </div>
                             `);
+                        
+                        // Smart Label Logic
+                        if (showLabels) {
+                            marker.bindTooltip(item.clientName, {
+                                permanent: true,
+                                direction: 'top',
+                                offset: [0, -10],
+                                className: 'map-text-label'
+                            });
+                        }
+
                         markers.addLayer(marker);
                     }
                 });
@@ -195,12 +210,22 @@
                 if(data.length > 0) map.fitBounds(markers.getBounds(), { padding: [50, 50] });
                 
                 return () => map.remove();
-            }, [data]);
+            }, [data, showLabels]); // Re-render map when toggle changes
 
             return e('div', { className: "fixed inset-0 bg-black/90 z-50 flex flex-col p-4 fade-in" },
                 e('div', { className: "bg-white rounded-xl shadow-2xl flex-1 flex flex-col overflow-hidden relative" },
                     e('div', { className: "p-4 border-b flex justify-between items-center bg-slate-50" },
-                        e('h2', { className: "font-bold text-lg" }, e('i', { className: "fa-solid fa-map-location-dot mr-2 text-blue-600" }), "Admin Map Overview"),
+                        e('div', { className: "flex items-center gap-4" },
+                            e('h2', { className: "font-bold text-lg" }, e('i', { className: "fa-solid fa-map-location-dot mr-2 text-blue-600" }), "Admin Map"),
+                            // Toggle Button
+                            e('button', { 
+                                onClick: () => setShowLabels(!showLabels),
+                                className: `text-xs px-3 py-1.5 rounded-full font-bold transition-colors flex items-center gap-2 border ${showLabels ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300'}`
+                            }, 
+                                e('i', { className: `fa-solid ${showLabels ? 'fa-eye' : 'fa-eye-slash'}` }), 
+                                showLabels ? "Hide Names" : "Show Names"
+                            )
+                        ),
                         e('button', { onClick: onClose, className: "w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 flex items-center justify-center transition-colors" }, e('i', { className: "fa-solid fa-times" }))
                     ),
                     e('div', { className: "flex-1 relative" }, e('div', { id: "admin-map" })),
