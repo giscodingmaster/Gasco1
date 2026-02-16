@@ -3,18 +3,18 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>G Hand (Stable)</title>
+    <title>G Hand (Batch Upload)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/shpjs@latest/dist/shp.js"></script>
     
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
@@ -269,10 +269,9 @@
             const [refData, setRefData] = useState([]); 
             const [collected, setCollected] = useState([]);
             const [isLoading, setIsLoading] = useState(true);
+            const [uploadProgress, setUploadProgress] = useState(null); // NEW
 
-            // Load saved sheet name
             const [selGov, setSelGov] = useState(localStorage.getItem('ghand_selGov') || '');
-            
             const [selIndex, setSelIndex] = useState('');
             const [searchTerm, setSearchTerm] = useState('');
             const [gMapLink, setGMapLink] = useState('');
@@ -289,7 +288,6 @@
                 const db = window.firebase.database();
                 db.ref('masterReference').on('value', snap => {
                     const val = snap.val();
-                    // Fallback check: val.data OR just val (if data is flat array)
                     const actualData = (val && val.data) ? val.data : (Array.isArray(val) ? val : []);
                     setRefData(actualData);
                     setIsLoading(false);
@@ -317,18 +315,6 @@
                 setSelIndex('');
                 setSearchTerm('');
             };
-
-            useEffect(() => {
-                if (qrData) {
-                    setTimeout(() => {
-                        const canvas = document.getElementById('qr-canvas');
-                        if (canvas && window.QRCode) {
-                            const qrContent = `Client:${qrData.commercialCode}\nCRN:${qrData.crn}\nStatus:${qrData.status}\nLat:${qrData.latitude}\nLon:${qrData.longitude}`;
-                            window.QRCode.toCanvas(canvas, qrContent, { width: 200 }, (err) => { if (err) console.error(err); });
-                        }
-                    }, 100);
-                }
-            }, [qrData]);
 
             const normalizeKeys = (row) => ({
                 id: row['UniqueID'],
@@ -400,35 +386,64 @@
                 } catch (err) { alert('Browser blocked paste. Use Ctrl+V'); }
             };
 
+            // --- BATCH UPLOAD FUNCTION ---
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
                 setIsLoading(true);
+                setUploadProgress("Preparing file...");
+                
                 const reader = new FileReader();
-                reader.onload = (evt) => {
+                reader.onload = async (evt) => {
                     try {
                         const wb = XLSX.read(evt.target.result, { type: 'array' });
                         const ws = wb.Sheets[wb.SheetNames[0]];
                         const json = XLSX.utils.sheet_to_json(ws); 
                         if (!json.length) throw new Error("Empty file");
+
                         const processed = json.map((row, idx) => {
                             const newRow = {};
                             Object.keys(row).forEach(key => {
-                                // Robust key sanitization: Remove only dots/brackets for Firebase, preserve Arabic
                                 const safeKey = key.replace(/[.#$/\[\]]/g, '_').replace(/[\x00-\x1F\x7F]+/g, ' ').trim();
                                 newRow[safeKey] = row[key];
                             });
                             newRow.UniqueID = idx;
                             return newRow;
                         });
-                        window.firebase.database().ref('masterReference').set({ 
-                            fileName: file.name, 
-                            data: processed, 
-                            updatedAt: new Date().toISOString() 
-                        }).then(() => {
-                            showAlert("تم تحديث قاعدة البيانات بنجاح");
-                        });
-                    } catch (err) { showAlert("خطأ: " + err.message, 'error'); setIsLoading(false); }
+
+                        // BATCHING LOGIC
+                        const dbRef = window.firebase.database().ref('masterReference/data');
+                        const batchSize = 500;
+                        const totalBatches = Math.ceil(processed.length / batchSize);
+
+                        // First, update metadata (optional)
+                        await window.firebase.database().ref('masterReference/updatedAt').set(new Date().toISOString());
+                        await window.firebase.database().ref('masterReference/fileName').set(file.name);
+
+                        // Upload chunks
+                        for (let i = 0; i < totalBatches; i++) {
+                            const start = i * batchSize;
+                            const end = start + batchSize;
+                            const chunk = processed.slice(start, end);
+                            
+                            // Create an object for update to keep keys consistent
+                            const updates = {};
+                            chunk.forEach((item, idx) => {
+                                updates[start + idx] = item; 
+                            });
+
+                            setUploadProgress(`Uploading batch ${i + 1} of ${totalBatches}...`);
+                            await dbRef.update(updates);
+                        }
+
+                        setUploadProgress(null);
+                        setIsLoading(false);
+                        showAlert("تم تحديث قاعدة البيانات بنجاح (Batch Mode)");
+                    } catch (err) { 
+                        showAlert("خطأ: " + err.message, 'error'); 
+                        setUploadProgress(null);
+                        setIsLoading(false); 
+                    }
                 };
                 reader.readAsArrayBuffer(file);
             };
@@ -661,7 +676,10 @@
                     e('i', { className: "fa-solid fa-cloud-upload-alt text-2xl text-slate-400 mb-2" }),
                     e('p', { className: "text-sm text-slate-600 font-medium" }, "تحديث قاعدة البيانات (Excel)"),
                     e('p', { className: "text-xs text-slate-400" }, "Drag & drop or click to upload"),
-                    isLoading && e('div', { className: "absolute inset-0 bg-white/80 flex items-center justify-center" }, e('div', { className: "spinner" }))
+                    isLoading && e('div', { className: "absolute inset-0 bg-white/80 flex items-center justify-center flex-col" }, 
+                        e('div', { className: "spinner mb-2" }),
+                        uploadProgress && e('span', { className: "text-xs font-bold text-blue-600" }, uploadProgress)
+                    )
                 )
             );
 
