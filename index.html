@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>G Hand (Smart CRN Sync)</title>
+    <title>G Hand (Auto-Save)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -29,13 +29,13 @@
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         #admin-map { height: 100%; width: 100%; border-radius: 12px; z-index: 1; }
-        .leaflet-control-layers { text-align: left; font-family: sans-serif; }
         .map-text-label {
             background: rgba(255, 255, 255, 0.85); border: 1px solid #aaa; border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.2); padding: 0 4px; font-size: 11px;
-            font-weight: bold; color: #333; white-space: nowrap; text-align: center;
+            padding: 0 4px; font-size: 11px; font-weight: bold; color: #333; white-space: nowrap; text-align: center;
         }
         .leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before, .leaflet-tooltip-right:before { display: none !important; }
+        .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3b82f6; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 <script type="importmap">
 {
@@ -124,11 +124,13 @@
             CLIENT_STATUS: 'حالة العميل (ملاحظات)' 
         };
 
-        const StatsCard = ({ title, value, icon, color }) => 
+        const StatsCard = ({ title, value, icon, color, loading }) => 
             e('div', { className: "bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex items-center justify-between" },
                 e('div', null,
                     e('p', { className: "text-slate-500 text-xs font-semibold uppercase tracking-wider" }, title),
-                    e('h3', { className: "text-2xl font-bold text-slate-800 mt-1" }, value)
+                    loading ? 
+                        e('div', { className: "flex items-center gap-2 mt-2" }, e('div', { className: "spinner" }), e('span', { className: "text-xs text-slate-400" }, "Loading...")) :
+                        e('h3', { className: "text-2xl font-bold text-slate-800 mt-1" }, value)
                 ),
                 e('div', { className: `w-10 h-10 rounded-full flex items-center justify-center ${color}` },
                     e('i', { className: `fa-solid ${icon} text-white` })
@@ -268,11 +270,13 @@
             
             const [refData, setRefData] = useState([]); 
             const [collected, setCollected] = useState([]);
+            const [isLoading, setIsLoading] = useState(true); // NEW: Loading state
+
+            // NEW: Load initial selection from localStorage
+            const [selGov, setSelGov] = useState(localStorage.getItem('ghand_selGov') || '');
             
-            const [selGov, setSelGov] = useState('');
             const [selIndex, setSelIndex] = useState('');
             const [searchTerm, setSearchTerm] = useState('');
-            
             const [gMapLink, setGMapLink] = useState('');
             const [coords, setCoords] = useState(null);
             const [utm, setUtm] = useState(null);
@@ -287,7 +291,10 @@
                 const db = window.firebase.database();
                 db.ref('masterReference').on('value', snap => {
                     const val = snap.val();
-                    if (val && val.data) setRefData(val.data);
+                    if (val && val.data) {
+                        setRefData(val.data);
+                    }
+                    setIsLoading(false); // Stop loading when data arrives
                 });
                 db.ref('collectedLocations').on('value', snap => {
                     const val = snap.val();
@@ -297,6 +304,15 @@
                     setCollected(list);
                 });
             }, []);
+
+            // Helper to save selection
+            const handleGovChange = (e) => {
+                const val = e.target.value;
+                setSelGov(val);
+                localStorage.setItem('ghand_selGov', val); // Save to browser
+                setSelIndex('');
+                setSearchTerm('');
+            };
 
             useEffect(() => {
                 if (qrData) {
@@ -383,6 +399,7 @@
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
+                setIsLoading(true); // Show spinner during upload
                 const reader = new FileReader();
                 reader.onload = (evt) => {
                     try {
@@ -403,8 +420,11 @@
                             fileName: file.name, 
                             data: processed, 
                             updatedAt: new Date().toISOString() 
-                        }).then(() => showAlert("تم تحديث قاعدة البيانات بنجاح"));
-                    } catch (err) { showAlert("خطأ: " + err.message, 'error'); }
+                        }).then(() => {
+                            showAlert("تم تحديث قاعدة البيانات بنجاح");
+                            setIsLoading(false);
+                        });
+                    } catch (err) { showAlert("خطأ: " + err.message, 'error'); setIsLoading(false); }
                 };
                 reader.readAsArrayBuffer(file);
             };
@@ -446,6 +466,7 @@
                 if (idx !== -1) {
                     setSelIndex(idx.toString());
                     setSelGov(normalizeKeys(refData[idx]).governorate);
+                    localStorage.setItem('ghand_selGov', normalizeKeys(refData[idx]).governorate); // Auto-save selection
                     setStatus(rec.status || 'Active'); 
                     handleLinkChange(`${rec.latitude}, ${rec.longitude}`);
                     setEditId(rec.crn);
@@ -514,7 +535,6 @@
                 a.click();
             };
 
-            // --- SPLIT COMPONENTS TO AVOID SYNTAX ERRORS ---
             const Sidebar = () => e('div', { className: "glass-panel rounded-xl p-5" },
                 e('div', { className: "flex justify-between items-center mb-4" },
                     e('h2', { className: "font-bold text-slate-800 flex items-center gap-2" }, 
@@ -527,7 +547,7 @@
                     e('select', { 
                         className: "w-full p-2.5 rounded-lg border border-slate-300 bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none transition-all",
                         value: selGov,
-                        onChange: e => { setSelGov(e.target.value); setSelIndex(''); setSearchTerm(''); }
+                        onChange: handleGovChange // Changed to helper
                     },
                         e('option', { value: "" }, "اختر الشيت..."),
                         govs.map(g => e('option', { key: g, value: g }, g))
@@ -632,7 +652,10 @@
                     e('input', { type: "file", className: "absolute inset-0 opacity-0 cursor-pointer", onChange: handleFileUpload }),
                     e('i', { className: "fa-solid fa-cloud-upload-alt text-2xl text-slate-400 mb-2" }),
                     e('p', { className: "text-sm text-slate-600 font-medium" }, "تحديث قاعدة البيانات (Excel)"),
-                    e('p', { className: "text-xs text-slate-400" }, "Drag & drop or click to upload")
+                    e('p', { className: "text-xs text-slate-400" }, "Drag & drop or click to upload"),
+                    isLoading && e('div', { className: "absolute inset-0 bg-white/80 flex items-center justify-center" }, 
+                        e('div', { className: "spinner" })
+                    )
                 )
             );
 
@@ -698,7 +721,6 @@
                 )
             );
 
-            // --- MAIN RETURN STRUCTURE ---
             return e(React.Fragment, null,
                 e('nav', { className: "bg-slate-900 text-white sticky top-0 z-40 shadow-lg" },
                     e('div', { className: "container mx-auto px-4 py-3 flex justify-between items-center" },
@@ -721,7 +743,7 @@
 
                 e('div', { className: "container mx-auto p-4 max-w-7xl" },
                     e('div', { className: "grid grid-cols-2 md:grid-cols-4 gap-4 mb-6" },
-                        e(StatsCard, { title: "إجمالي العملاء", value: refData.length, icon: "fa-database", color: "bg-blue-500" }),
+                        e(StatsCard, { title: "إجمالي العملاء", value: refData.length, icon: "fa-database", color: "bg-blue-500", loading: isLoading }),
                         e(StatsCard, { title: "تم الجمع", value: collected.length, icon: "fa-check-circle", color: "bg-emerald-500" }),
                         e(StatsCard, { title: "المتبقي", value: Math.max(0, refData.length - collected.length), icon: "fa-clock", color: "bg-amber-500" }),
                         e(StatsCard, { title: "نسبة الإنجاز", value: `${refData.length > 0 ? Math.round((collected.length/refData.length)*100) : 0}%`, icon: "fa-chart-pie", color: "bg-purple-500" })
