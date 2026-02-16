@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>G Hand (Fix Data Mode)</title>
+    <title>G Hand (Composite Key Logic)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -36,13 +36,12 @@
         .leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before, .leaflet-tooltip-right:before { display: none !important; }
         .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3b82f6; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        
-        /* Fix Data Search Box */
         .search-control {
             position: absolute; top: 10px; left: 50px; z-index: 1000;
             background: white; padding: 5px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
             display: flex; gap: 5px; width: 300px;
         }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(234, 179, 8, 0); } 100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0); } }
     </style>
 <script type="importmap">
 {
@@ -75,6 +74,19 @@
         
         if (!window.firebase.apps.length) window.firebase.initializeApp(firebaseConfig);
         if (window.proj4) window.proj4.defs("EPSG:32636", "+proj=utm +zone=36 +datum=WGS84 +units=m +no_defs");
+
+        // --- NEW: Safe Key Generator (CRN + Client Name) ---
+        function generateKey(crn, clientName) {
+            const safeCrn = cleanCRN(crn);
+            // Remove special chars from name to make it URL-safe for Firebase keys
+            // Replaces spaces with underscores, removes dots/slashes/etc
+            const safeName = (clientName || "Unknown")
+                .toString()
+                .replace(/[.#$/\[\]]/g, '') // Forbidden Firebase chars
+                .replace(/\s+/g, '_');      // Spaces to underscore
+            
+            return `${safeCrn}_${safeName}`;
+        }
 
         function cleanCRN(value) {
             if (!value) return "UNKNOWN";
@@ -152,26 +164,32 @@
         };
 
         // =========================================================
-        // FIX DATA MAP (Interactive Editor)
+        // FIX DATA MAP
         // =========================================================
-        const FixDataMap = ({ data, onClose }) => {
+        const FixDataMap = ({ data, onClose, onDelete }) => {
             const mapRef = React.useRef(null);
             const markersRef = React.useRef({});
             const [searchTerm, setSearchTerm] = React.useState("");
 
             React.useEffect(() => {
-                // Global update function for Popup buttons
                 window.GHand_UpdateLoc = (key, lat, lng) => {
                     const utm = convertToUTM(lat, lng);
                     const updates = {
                         latitude: lat.toFixed(6),
                         longitude: lng.toFixed(6),
                         utmX: utm.x.toFixed(2),
-                        utmY: utm.y.toFixed(2)
+                        utmY: utm.y.toFixed(2),
+                        timestamp: new Date().toISOString()
                     };
                     window.firebase.database().ref(`collectedLocations/${key}`).update(updates)
-                        .then(() => alert("Saved Successfully!\nتم تعديل الموقع بنجاح"))
-                        .catch(err => alert("Error: " + err.message));
+                        .then(() => alert("✅ تم تحديث الموقع بنجاح!"))
+                        .catch(err => alert("❌ خطأ: " + err.message));
+                };
+
+                window.GHand_DeleteFixMode = (id) => {
+                    if (confirm("⚠️ هل أنت متأكد من حذف هذا الموقع نهائياً؟")) {
+                        onDelete(id);
+                    }
                 };
 
                 window.GHand_EnableDrag = (key) => {
@@ -184,7 +202,15 @@
                             iconSize: [18, 18], iconAnchor: [9, 9] 
                         }));
                         marker.closePopup();
-                        marker.bindPopup(`<div class="text-center font-bold">Drag me!<br><button class="mt-2 bg-blue-600 text-white px-2 py-1 rounded text-xs" onclick="window.GHand_SaveDrag('${key}')">Save New Location</button></div>`).openPopup();
+                        marker.bindPopup(`
+                            <div class="text-center font-bold font-sans">
+                                <div>Drag to new location...</div>
+                                <div class="text-xs text-amber-600 mb-2">(اسحب الدبوس للمكان الجديد)</div>
+                                <button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded shadow text-xs font-bold transition-colors" onclick="window.GHand_SaveDrag('${key}')">
+                                    <i class="fa-solid fa-save"></i> حفظ الموقع الجديد
+                                </button>
+                            </div>
+                        `).openPopup();
                     }
                 };
 
@@ -194,7 +220,6 @@
                         const pos = marker.getLatLng();
                         window.GHand_UpdateLoc(key, pos.lat, pos.lng);
                         marker.dragging.disable();
-                        // Reset icon (will happen automatically on next render actually, but good for UI feedback)
                         marker.closePopup();
                     }
                 };
@@ -203,13 +228,13 @@
                     delete window.GHand_UpdateLoc;
                     delete window.GHand_EnableDrag;
                     delete window.GHand_SaveDrag;
+                    delete window.GHand_DeleteFixMode;
                 };
-            }, []);
+            }, [onDelete]);
 
             React.useEffect(() => {
                 if (!document.getElementById('fix-map')) return;
 
-                // BASE MAP: Google Satellite ONLY (lyrs=s) - No Labels
                 const googleSatNoLabels = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{ maxZoom: 21, subdomains:['mt0','mt1','mt2','mt3'] });
 
                 const map = L.map('fix-map', { center: [26.8206, 30.8025], zoom: 6, layers: [googleSatNoLabels] });
@@ -222,26 +247,30 @@
                     const lat = parseFloat(item.latitude);
                     const lon = parseFloat(item.longitude);
                     if(!isNaN(lat) && !isNaN(lon)) {
-                        const markerHtml = `<div style="background-color: #3b82f6; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 2px black;"></div>`;
+                        const markerHtml = `<div style="background-color: #3b82f6; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px black;"></div>`;
                         const icon = L.divIcon({ className: 'custom-div-icon', html: markerHtml, iconSize: [12, 12], iconAnchor: [6, 6] });
                         
                         const marker = L.marker([lat, lon], { icon: icon });
                         
                         marker.bindPopup(`
-                            <div class="text-right dir-rtl font-sans min-w-[200px]">
+                            <div class="text-right dir-rtl font-sans min-w-[220px]">
                                 <h3 class="font-bold text-base text-blue-800 border-b pb-1 mb-1">${item.clientName}</h3>
-                                <p class="text-xs text-gray-700"><b>SAP/Code:</b> ${item.commercialCode}</p>
+                                <p class="text-xs text-gray-700"><b>Code:</b> ${item.commercialCode}</p>
                                 <p class="text-xs text-gray-700 font-mono"><b>CRN:</b> ${item.crn}</p>
-                                <div class="mt-3 pt-2 border-t flex justify-center">
-                                    <button onclick="window.GHand_EnableDrag('${item.firebaseId}')" class="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold py-1.5 px-3 rounded shadow transition-colors flex items-center gap-1">
-                                        <i class="fa-solid fa-arrows-up-down-left-right"></i> Unlock & Move
+                                
+                                <div class="mt-3 pt-2 border-t flex gap-2 justify-center">
+                                    <button onclick="window.GHand_EnableDrag('${item.firebaseId}')" class="flex-1 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold py-1.5 px-2 rounded shadow transition-colors">
+                                        <i class="fa-solid fa-arrows-up-down-left-right"></i> تعديل (Move)
+                                    </button>
+                                    <button onclick="window.GHand_DeleteFixMode('${item.firebaseId}')" class="flex-1 bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-1.5 px-2 rounded shadow transition-colors">
+                                        <i class="fa-solid fa-trash"></i> حذف (Delete)
                                     </button>
                                 </div>
                             </div>
                         `);
                         
                         markersGroup.addLayer(marker);
-                        markersRef.current[item.firebaseId] = marker; // Store Ref for search
+                        markersRef.current[item.firebaseId] = marker; 
                     }
                 });
 
@@ -264,31 +293,27 @@
 
                 if (found && markersRef.current[found.firebaseId]) {
                     const marker = markersRef.current[found.firebaseId];
-                    mapRef.current.setView(marker.getLatLng(), 18); // Zoom deep
+                    mapRef.current.setView(marker.getLatLng(), 19); 
                     marker.openPopup();
                 } else {
-                    alert("Not found / غير موجود");
+                    alert("غير موجود (Not found)");
                 }
             };
 
             return e('div', { className: "fixed inset-0 bg-black/90 z-50 flex flex-col p-4 fade-in" },
                 e('div', { className: "bg-white rounded-xl shadow-2xl flex-1 flex flex-col overflow-hidden relative" },
-                    // Header
                     e('div', { className: "p-4 border-b flex justify-between items-center bg-amber-50" },
                         e('div', { className: "flex items-center gap-3" },
                             e('h2', { className: "font-bold text-lg text-amber-800" }, e('i', { className: "fa-solid fa-screwdriver-wrench mr-2" }), "Fix Data Mode (تعديل البيانات)"),
                         ),
                         e('button', { onClick: onClose, className: "w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 flex items-center justify-center transition-colors" }, e('i', { className: "fa-solid fa-times" }))
                     ),
-                    
-                    // Map Container
                     e('div', { className: "flex-1 relative" }, 
-                        // Search Overlay
                         e('div', { className: "search-control flex gap-1" },
                              e('input', { 
                                 type: "text", 
-                                className: "flex-1 px-3 py-1.5 text-sm border rounded outline-none", 
-                                placeholder: "Search Name, CRN, Code...",
+                                className: "flex-1 px-3 py-1.5 text-sm border rounded outline-none text-right dir-rtl", 
+                                placeholder: "بحث بالاسم أو CRN...",
                                 value: searchTerm,
                                 onChange: e => setSearchTerm(e.target.value),
                                 onKeyDown: e => e.key === 'Enter' && handleSearch(e)
@@ -297,9 +322,8 @@
                         ),
                         e('div', { id: "fix-map" })
                     ),
-                    
                     e('div', { className: "p-3 bg-amber-50 border-t text-xs text-center text-amber-800 font-semibold" },
-                        "Instructions: Search for a point -> Click 'Unlock & Move' -> Drag to correct spot -> Save."
+                        "Instructions: Search -> Click 'Move' -> Drag -> Save. (Updates Database Immediately)"
                     )
                 )
             );
@@ -426,7 +450,7 @@
             const [passInput, setPassInput] = useState('');
             const [showLogin, setShowLogin] = useState(false);
             const [showMap, setShowMap] = useState(false); 
-            const [showFixMap, setShowFixMap] = useState(false); // NEW STATE FOR FIX DATA
+            const [showFixMap, setShowFixMap] = useState(false); 
             
             const [refData, setRefData] = useState([]); 
             const [collected, setCollected] = useState([]);
@@ -498,9 +522,12 @@
                 return Array.from(s).sort();
             }, [refData]);
 
+            // UPDATED: Check for Composite Key match
             const filteredClients = useMemo(() => {
                 if (!selGov) return [];
-                const collectedCRNs = new Set(collected.map(c => String(c.crn)));
+                // Create a Set of existing composite keys to mark as Done
+                const collectedKeys = new Set(collected.map(c => c.firebaseId)); 
+                
                 let list = refData
                     .map((r, i) => ({ ...normalizeKeys(r), originalIndex: i }))
                     .filter(r => r.governorate.toString().trim() === selGov);
@@ -513,7 +540,12 @@
                         r.crn.includes(lowerSearch)
                     );
                 }
-                return list.map(r => ({ ...r, isDone: collectedCRNs.has(String(r.crn)) }));
+                
+                // Match based on generating the key
+                return list.map(r => ({ 
+                    ...r, 
+                    isDone: collectedKeys.has(generateKey(r.crn, r.clientName)) 
+                }));
             }, [selGov, refData, collected, searchTerm]);
 
             const selectedItem = useMemo(() => {
@@ -603,11 +635,16 @@
                 reader.readAsArrayBuffer(file);
             };
 
+            // UPDATED: Save with Composite Key
             const handleSubmit = (e) => {
                 e.preventDefault();
                 if (!coords || selIndex === '') return showAlert("بيانات ناقصة", 'error');
                 const norm = selectedItem;
                 if (!norm.crn || norm.crn === "UNKNOWN") return showAlert("خطأ: لا يوجد CRN لهذا العميل", 'error');
+                
+                // Composite Key: CRN_ClientName (Safe)
+                const key = generateKey(norm.crn, norm.clientName);
+
                 const payload = {
                     masterRefId: norm.UniqueID, 
                     clientName: norm.clientName,
@@ -624,9 +661,8 @@
                     utmZone: '36N',
                     timestamp: new Date().toISOString()
                 };
-                const db = window.firebase.database();
-                const key = norm.crn; 
-                db.ref(`collectedLocations/${key}`).set(payload)
+                
+                window.firebase.database().ref(`collectedLocations/${key}`).set(payload)
                   .then(() => { showAlert("تم الحفظ بنجاح"); resetForm(); });
             };
 
@@ -635,29 +671,44 @@
                 setStatus('Active'); 
             };
             
+            // UPDATED: Edit using Composite Key
             const handleEdit = (rec) => {
-                const idx = refData.findIndex(r => cleanCRN(r[COLS.CRN]) === rec.crn);
+                // Find original Excel record
+                // Since Firebase Key = generated from Excel, we reverse check
+                const idx = refData.findIndex(r => generateKey(cleanCRN(r[COLS.CRN]), r[COLS.CLIENT]) === rec.firebaseId);
+                
                 if (idx !== -1) {
                     setSelIndex(idx.toString());
                     setSelGov(normalizeKeys(refData[idx]).governorate);
                     localStorage.setItem('ghand_selGov', normalizeKeys(refData[idx]).governorate);
                     setStatus(rec.status || 'Active'); 
                     handleLinkChange(`${rec.latitude}, ${rec.longitude}`);
-                    setEditId(rec.crn);
+                    setEditId(rec.firebaseId);
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 } else {
-                    showAlert("هذا العميل غير موجود في ملف الإكسل الأصلي", "error");
+                    // Fallback: Try searching just by CRN if name changed
+                    const fallbackIdx = refData.findIndex(r => cleanCRN(r[COLS.CRN]) === rec.crn);
+                    if (fallbackIdx !== -1) {
+                         setSelIndex(fallbackIdx.toString());
+                         setSelGov(normalizeKeys(refData[fallbackIdx]).governorate);
+                         handleLinkChange(`${rec.latitude}, ${rec.longitude}`);
+                         setEditId(rec.firebaseId); // Keep existing ID
+                    } else {
+                        showAlert("هذا العميل غير موجود في ملف الإكسل الأصلي", "error");
+                    }
                 }
             };
 
-            const handleDelete = (id) => { if(confirm("حذف؟")) window.firebase.database().ref(`collectedLocations/${id}`).remove(); };
+            const handleDelete = (id) => { window.firebase.database().ref(`collectedLocations/${id}`).remove(); };
             
             const exportExcel = () => {
+                // Map by ID (Composite Key)
                 const map = {};
-                collected.forEach(c => map[c.crn] = c);
+                collected.forEach(c => map[c.firebaseId] = c);
+                
                 const output = refData.map(row => {
-                    const cleanC = cleanCRN(row[COLS.CRN]);
-                    const c = map[cleanC];
+                    const key = generateKey(cleanCRN(row[COLS.CRN]), row[COLS.CLIENT]);
+                    const c = map[key];
                     return { 
                         ...row, 
                         'Status': c?.status || 'Pending', 
@@ -908,8 +959,8 @@
                             e('h1', { className: "text-lg font-bold tracking-wide" }, "G Hand")
                         ),
                         e('div', { className: "flex gap-2" },
-                            isAdmin && e('button', { 
-                                onClick: () => setShowFixMap(true), // NEW: Open Fix Map
+                            e('button', { 
+                                onClick: () => setShowFixMap(true), // Visible for all
                                 className: "text-xs font-semibold bg-amber-600 hover:bg-amber-700 px-3 py-1.5 rounded-full transition-colors flex items-center gap-2"
                             }, e('i', { className: "fa-solid fa-screwdriver-wrench" }), "Fix Data"),
 
@@ -958,8 +1009,7 @@
 
                 showMap && e(AdminMap, { data: collected, onClose: () => setShowMap(false), onDelete: handleDelete }),
                 
-                // NEW: FIX DATA MAP
-                showFixMap && e(FixDataMap, { data: collected, onClose: () => setShowFixMap(false) }),
+                showFixMap && e(FixDataMap, { data: collected, onClose: () => setShowFixMap(false), onDelete: handleDelete }),
 
                 qrData && e('div', { className: "fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4", onClick: () => setQrData(null) },
                     e('div', { className: "bg-white p-6 rounded-3xl shadow-2xl max-w-sm w-full text-center printable-area", onClick: e => e.stopPropagation() },
