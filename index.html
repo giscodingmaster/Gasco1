@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>G Hand (Composite Key Logic)</title>
+    <title>G Hand (Fixed Export)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -75,16 +75,13 @@
         if (!window.firebase.apps.length) window.firebase.initializeApp(firebaseConfig);
         if (window.proj4) window.proj4.defs("EPSG:32636", "+proj=utm +zone=36 +datum=WGS84 +units=m +no_defs");
 
-        // --- NEW: Safe Key Generator (CRN + Client Name) ---
+        // --- SAFE KEY GENERATOR ---
         function generateKey(crn, clientName) {
             const safeCrn = cleanCRN(crn);
-            // Remove special chars from name to make it URL-safe for Firebase keys
-            // Replaces spaces with underscores, removes dots/slashes/etc
             const safeName = (clientName || "Unknown")
                 .toString()
-                .replace(/[.#$/\[\]]/g, '') // Forbidden Firebase chars
-                .replace(/\s+/g, '_');      // Spaces to underscore
-            
+                .replace(/[.#$/\[\]]/g, '') 
+                .replace(/\s+/g, '_');      
             return `${safeCrn}_${safeName}`;
         }
 
@@ -522,10 +519,9 @@
                 return Array.from(s).sort();
             }, [refData]);
 
-            // UPDATED: Check for Composite Key match
+            // UPDATED FILTER: Check for Composite Key match
             const filteredClients = useMemo(() => {
                 if (!selGov) return [];
-                // Create a Set of existing composite keys to mark as Done
                 const collectedKeys = new Set(collected.map(c => c.firebaseId)); 
                 
                 let list = refData
@@ -541,7 +537,7 @@
                     );
                 }
                 
-                // Match based on generating the key
+                // Match based on generated key
                 return list.map(r => ({ 
                     ...r, 
                     isDone: collectedKeys.has(generateKey(r.crn, r.clientName)) 
@@ -635,14 +631,12 @@
                 reader.readAsArrayBuffer(file);
             };
 
-            // UPDATED: Save with Composite Key
             const handleSubmit = (e) => {
                 e.preventDefault();
                 if (!coords || selIndex === '') return showAlert("بيانات ناقصة", 'error');
                 const norm = selectedItem;
                 if (!norm.crn || norm.crn === "UNKNOWN") return showAlert("خطأ: لا يوجد CRN لهذا العميل", 'error');
                 
-                // Composite Key: CRN_ClientName (Safe)
                 const key = generateKey(norm.crn, norm.clientName);
 
                 const payload = {
@@ -671,10 +665,8 @@
                 setStatus('Active'); 
             };
             
-            // UPDATED: Edit using Composite Key
             const handleEdit = (rec) => {
-                // Find original Excel record
-                // Since Firebase Key = generated from Excel, we reverse check
+                // Find matching record by Composite Key
                 const idx = refData.findIndex(r => generateKey(cleanCRN(r[COLS.CRN]), r[COLS.CLIENT]) === rec.firebaseId);
                 
                 if (idx !== -1) {
@@ -686,13 +678,13 @@
                     setEditId(rec.firebaseId);
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 } else {
-                    // Fallback: Try searching just by CRN if name changed
+                    // Fallback to legacy CRN check
                     const fallbackIdx = refData.findIndex(r => cleanCRN(r[COLS.CRN]) === rec.crn);
                     if (fallbackIdx !== -1) {
                          setSelIndex(fallbackIdx.toString());
                          setSelGov(normalizeKeys(refData[fallbackIdx]).governorate);
                          handleLinkChange(`${rec.latitude}, ${rec.longitude}`);
-                         setEditId(rec.firebaseId); // Keep existing ID
+                         setEditId(rec.firebaseId); 
                     } else {
                         showAlert("هذا العميل غير موجود في ملف الإكسل الأصلي", "error");
                     }
@@ -701,22 +693,28 @@
 
             const handleDelete = (id) => { window.firebase.database().ref(`collectedLocations/${id}`).remove(); };
             
+            // --- FIXED EXPORT EXCEL LOGIC ---
             const exportExcel = () => {
-                // Map by ID (Composite Key)
-                const map = {};
-                collected.forEach(c => map[c.firebaseId] = c);
-                
                 const output = refData.map(row => {
-                    const key = generateKey(cleanCRN(row[COLS.CRN]), row[COLS.CLIENT]);
-                    const c = map[key];
+                    const rowCRN = cleanCRN(row[COLS.CRN]);
+                    
+                    // Smart Matching Logic
+                    // 1. Match Exact CRN + Client Name (Composite Key logic)
+                    let match = collected.find(c => c.crn === rowCRN && c.clientName === row[COLS.CLIENT]);
+                    
+                    // 2. Fallback: Match just CRN if Name differs slightly
+                    if (!match) {
+                        match = collected.find(c => c.crn === rowCRN);
+                    }
+
                     return { 
                         ...row, 
-                        'Status': c?.status || 'Pending', 
-                        'Lat': c?.latitude||'', 
-                        'Lon': c?.longitude||'', 
-                        'UTM_X': c?.utmX||'', 
-                        'UTM_Y': c?.utmY||'', 
-                        'Date': c ? new Date(c.timestamp).toLocaleDateString() : '' 
+                        'Status': match?.status || 'Pending', 
+                        'Lat': match?.latitude || '', 
+                        'Lon': match?.longitude || '', 
+                        'UTM_X': match?.utmX || '', 
+                        'UTM_Y': match?.utmY || '', 
+                        'Date': match ? new Date(match.timestamp).toLocaleDateString() : '' 
                     };
                 });
                 const ws = XLSX.utils.json_to_sheet(output);
