@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>G Hand (Batch Upload)</title>
+    <title>G Hand (Fix Data Mode)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -28,7 +28,7 @@
         .glass-panel { background: white; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-        #admin-map { height: 100%; width: 100%; border-radius: 12px; z-index: 1; }
+        #admin-map, #fix-map { height: 100%; width: 100%; border-radius: 12px; z-index: 1; }
         .map-text-label {
             background: rgba(255, 255, 255, 0.85); border: 1px solid #aaa; border-radius: 4px;
             padding: 0 4px; font-size: 11px; font-weight: bold; color: #333; white-space: nowrap; text-align: center;
@@ -36,6 +36,13 @@
         .leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before, .leaflet-tooltip-right:before { display: none !important; }
         .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3b82f6; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* Fix Data Search Box */
+        .search-control {
+            position: absolute; top: 10px; left: 50px; z-index: 1000;
+            background: white; padding: 5px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            display: flex; gap: 5px; width: 300px;
+        }
     </style>
 <script type="importmap">
 {
@@ -141,6 +148,160 @@
             const percent = total > 0 ? Math.round((current / total) * 100) : 0;
             return e('div', { className: "w-full bg-slate-200 rounded-full h-2.5 mt-2 overflow-hidden" },
                 e('div', { className: "bg-blue-600 h-2.5 rounded-full transition-all duration-500", style: { width: `${percent}%` } })
+            );
+        };
+
+        // =========================================================
+        // FIX DATA MAP (Interactive Editor)
+        // =========================================================
+        const FixDataMap = ({ data, onClose }) => {
+            const mapRef = React.useRef(null);
+            const markersRef = React.useRef({});
+            const [searchTerm, setSearchTerm] = React.useState("");
+
+            React.useEffect(() => {
+                // Global update function for Popup buttons
+                window.GHand_UpdateLoc = (key, lat, lng) => {
+                    const utm = convertToUTM(lat, lng);
+                    const updates = {
+                        latitude: lat.toFixed(6),
+                        longitude: lng.toFixed(6),
+                        utmX: utm.x.toFixed(2),
+                        utmY: utm.y.toFixed(2)
+                    };
+                    window.firebase.database().ref(`collectedLocations/${key}`).update(updates)
+                        .then(() => alert("Saved Successfully!\nتم تعديل الموقع بنجاح"))
+                        .catch(err => alert("Error: " + err.message));
+                };
+
+                window.GHand_EnableDrag = (key) => {
+                    const marker = markersRef.current[key];
+                    if (marker) {
+                        marker.dragging.enable();
+                        marker.setIcon(L.divIcon({ 
+                            className: 'custom-div-icon', 
+                            html: `<div style="background-color: #f59e0b; width: 18px; height: 18px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 10px yellow; animation: pulse 1s infinite;"></div>`,
+                            iconSize: [18, 18], iconAnchor: [9, 9] 
+                        }));
+                        marker.closePopup();
+                        marker.bindPopup(`<div class="text-center font-bold">Drag me!<br><button class="mt-2 bg-blue-600 text-white px-2 py-1 rounded text-xs" onclick="window.GHand_SaveDrag('${key}')">Save New Location</button></div>`).openPopup();
+                    }
+                };
+
+                window.GHand_SaveDrag = (key) => {
+                    const marker = markersRef.current[key];
+                    if (marker) {
+                        const pos = marker.getLatLng();
+                        window.GHand_UpdateLoc(key, pos.lat, pos.lng);
+                        marker.dragging.disable();
+                        // Reset icon (will happen automatically on next render actually, but good for UI feedback)
+                        marker.closePopup();
+                    }
+                };
+
+                return () => {
+                    delete window.GHand_UpdateLoc;
+                    delete window.GHand_EnableDrag;
+                    delete window.GHand_SaveDrag;
+                };
+            }, []);
+
+            React.useEffect(() => {
+                if (!document.getElementById('fix-map')) return;
+
+                // BASE MAP: Google Satellite ONLY (lyrs=s) - No Labels
+                const googleSatNoLabels = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{ maxZoom: 21, subdomains:['mt0','mt1','mt2','mt3'] });
+
+                const map = L.map('fix-map', { center: [26.8206, 30.8025], zoom: 6, layers: [googleSatNoLabels] });
+                mapRef.current = map;
+
+                const markersGroup = L.featureGroup();
+                markersRef.current = {};
+
+                data.forEach(item => {
+                    const lat = parseFloat(item.latitude);
+                    const lon = parseFloat(item.longitude);
+                    if(!isNaN(lat) && !isNaN(lon)) {
+                        const markerHtml = `<div style="background-color: #3b82f6; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 2px black;"></div>`;
+                        const icon = L.divIcon({ className: 'custom-div-icon', html: markerHtml, iconSize: [12, 12], iconAnchor: [6, 6] });
+                        
+                        const marker = L.marker([lat, lon], { icon: icon });
+                        
+                        marker.bindPopup(`
+                            <div class="text-right dir-rtl font-sans min-w-[200px]">
+                                <h3 class="font-bold text-base text-blue-800 border-b pb-1 mb-1">${item.clientName}</h3>
+                                <p class="text-xs text-gray-700"><b>SAP/Code:</b> ${item.commercialCode}</p>
+                                <p class="text-xs text-gray-700 font-mono"><b>CRN:</b> ${item.crn}</p>
+                                <div class="mt-3 pt-2 border-t flex justify-center">
+                                    <button onclick="window.GHand_EnableDrag('${item.firebaseId}')" class="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold py-1.5 px-3 rounded shadow transition-colors flex items-center gap-1">
+                                        <i class="fa-solid fa-arrows-up-down-left-right"></i> Unlock & Move
+                                    </button>
+                                </div>
+                            </div>
+                        `);
+                        
+                        markersGroup.addLayer(marker);
+                        markersRef.current[item.firebaseId] = marker; // Store Ref for search
+                    }
+                });
+
+                markersGroup.addTo(map);
+                if(data.length > 0) map.fitBounds(markersGroup.getBounds(), { padding: [50, 50] });
+
+                return () => map.remove();
+            }, [data]);
+
+            const handleSearch = (e) => {
+                e.preventDefault();
+                if (!searchTerm || !mapRef.current) return;
+                const lower = searchTerm.toLowerCase();
+                
+                const found = data.find(d => 
+                    d.clientName.toLowerCase().includes(lower) || 
+                    String(d.commercialCode).includes(lower) || 
+                    String(d.crn).includes(lower)
+                );
+
+                if (found && markersRef.current[found.firebaseId]) {
+                    const marker = markersRef.current[found.firebaseId];
+                    mapRef.current.setView(marker.getLatLng(), 18); // Zoom deep
+                    marker.openPopup();
+                } else {
+                    alert("Not found / غير موجود");
+                }
+            };
+
+            return e('div', { className: "fixed inset-0 bg-black/90 z-50 flex flex-col p-4 fade-in" },
+                e('div', { className: "bg-white rounded-xl shadow-2xl flex-1 flex flex-col overflow-hidden relative" },
+                    // Header
+                    e('div', { className: "p-4 border-b flex justify-between items-center bg-amber-50" },
+                        e('div', { className: "flex items-center gap-3" },
+                            e('h2', { className: "font-bold text-lg text-amber-800" }, e('i', { className: "fa-solid fa-screwdriver-wrench mr-2" }), "Fix Data Mode (تعديل البيانات)"),
+                        ),
+                        e('button', { onClick: onClose, className: "w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 flex items-center justify-center transition-colors" }, e('i', { className: "fa-solid fa-times" }))
+                    ),
+                    
+                    // Map Container
+                    e('div', { className: "flex-1 relative" }, 
+                        // Search Overlay
+                        e('div', { className: "search-control flex gap-1" },
+                             e('input', { 
+                                type: "text", 
+                                className: "flex-1 px-3 py-1.5 text-sm border rounded outline-none", 
+                                placeholder: "Search Name, CRN, Code...",
+                                value: searchTerm,
+                                onChange: e => setSearchTerm(e.target.value),
+                                onKeyDown: e => e.key === 'Enter' && handleSearch(e)
+                             }),
+                             e('button', { onClick: handleSearch, className: "bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700" }, e('i', { className: "fa-solid fa-search" }))
+                        ),
+                        e('div', { id: "fix-map" })
+                    ),
+                    
+                    e('div', { className: "p-3 bg-amber-50 border-t text-xs text-center text-amber-800 font-semibold" },
+                        "Instructions: Search for a point -> Click 'Unlock & Move' -> Drag to correct spot -> Save."
+                    )
+                )
             );
         };
 
@@ -265,11 +426,12 @@
             const [passInput, setPassInput] = useState('');
             const [showLogin, setShowLogin] = useState(false);
             const [showMap, setShowMap] = useState(false); 
+            const [showFixMap, setShowFixMap] = useState(false); // NEW STATE FOR FIX DATA
             
             const [refData, setRefData] = useState([]); 
             const [collected, setCollected] = useState([]);
             const [isLoading, setIsLoading] = useState(true);
-            const [uploadProgress, setUploadProgress] = useState(null); // NEW
+            const [uploadProgress, setUploadProgress] = useState(null); 
 
             const [selGov, setSelGov] = useState(localStorage.getItem('ghand_selGov') || '');
             const [selIndex, setSelIndex] = useState('');
@@ -386,7 +548,6 @@
                 } catch (err) { alert('Browser blocked paste. Use Ctrl+V'); }
             };
 
-            // --- BATCH UPLOAD FUNCTION ---
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -411,27 +572,21 @@
                             return newRow;
                         });
 
-                        // BATCHING LOGIC
                         const dbRef = window.firebase.database().ref('masterReference/data');
                         const batchSize = 500;
                         const totalBatches = Math.ceil(processed.length / batchSize);
 
-                        // First, update metadata (optional)
                         await window.firebase.database().ref('masterReference/updatedAt').set(new Date().toISOString());
                         await window.firebase.database().ref('masterReference/fileName').set(file.name);
 
-                        // Upload chunks
                         for (let i = 0; i < totalBatches; i++) {
                             const start = i * batchSize;
                             const end = start + batchSize;
                             const chunk = processed.slice(start, end);
-                            
-                            // Create an object for update to keep keys consistent
                             const updates = {};
                             chunk.forEach((item, idx) => {
                                 updates[start + idx] = item; 
                             });
-
                             setUploadProgress(`Uploading batch ${i + 1} of ${totalBatches}...`);
                             await dbRef.update(updates);
                         }
@@ -754,9 +909,15 @@
                         ),
                         e('div', { className: "flex gap-2" },
                             isAdmin && e('button', { 
+                                onClick: () => setShowFixMap(true), // NEW: Open Fix Map
+                                className: "text-xs font-semibold bg-amber-600 hover:bg-amber-700 px-3 py-1.5 rounded-full transition-colors flex items-center gap-2"
+                            }, e('i', { className: "fa-solid fa-screwdriver-wrench" }), "Fix Data"),
+
+                            isAdmin && e('button', { 
                                 onClick: () => setShowMap(true),
                                 className: "text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 rounded-full transition-colors flex items-center gap-2"
                             }, e('i', { className: "fa-solid fa-map" }), "Admin Map"),
+                            
                             e('button', { 
                                 onClick: () => isAdmin ? setIsAdmin(false) : setShowLogin(true),
                                 className: "text-xs font-semibold bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-full transition-colors"
@@ -796,6 +957,9 @@
                 ),
 
                 showMap && e(AdminMap, { data: collected, onClose: () => setShowMap(false), onDelete: handleDelete }),
+                
+                // NEW: FIX DATA MAP
+                showFixMap && e(FixDataMap, { data: collected, onClose: () => setShowFixMap(false) }),
 
                 qrData && e('div', { className: "fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4", onClick: () => setQrData(null) },
                     e('div', { className: "bg-white p-6 rounded-3xl shadow-2xl max-w-sm w-full text-center printable-area", onClick: e => e.stopPropagation() },
